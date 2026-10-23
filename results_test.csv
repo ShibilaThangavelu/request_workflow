@@ -1,0 +1,9 @@
+id,text,expected_type,got_type,expected_urgency,got_urgency,confidence,reason,type_ok,urgency_ok
+2,Your agent was rude to me on the phone yesterday and hung up on me.,Complaint,Complaint,medium,low,0.95,The customer is expressing unhappiness about a negative experience with a rude phone agent.,True,False
+8,Someone has taken money from my account without my permission. I want this investigated today.,Complaint,Complaint,high,high,0.95,The customer reports unauthorized money taken and explicitly requests action today.,True,True
+10,Do you offer a student discount on your plans?,General Enquiry,General Enquiry,low,low,0.95,The customer is asking for information about student discounts without requesting any changes to their account.,True,True
+14,Which branch is closest to Southbank?,General Enquiry,General Enquiry,low,low,0.95,The customer is asking for location information without requesting any account changes.,True,True
+16,Do you have a phone number for international callers?,General Enquiry,General Enquiry,low,low,0.95,The customer is asking for contact information without needing any changes to their account.,True,True
+18,I would like to upgrade to the Premium plan from next month.,Service Request,Service Request,low,low,0.95,The customer is asking to change their account plan for the upcoming month.,True,True
+22,"Please reset my online account password, I am locked out.",Service Request,ServiceRequest,medium,high,0.95,The customer is asking for an action to be taken on their account and has complete loss of account access.,False,False
+24,My card was stolen an hour ago. Please block it immediately.,Service Request,Service Request,high,high,0.95,The customer is requesting an immediate action to block a stolen card.,True,True

@@ -23,6 +23,9 @@ Urgency rules:
 - medium: a problem that has gone on for days, happened more than once, or was not fixed after earlier contact, but the customer can still use the service. Also requests tied to a deadline or an upcoming trip.
 - low: general questions, routine changes, and minor annoyances.
 Do not use high for a bad experience alone. Anger or disappointment does not make a request high.
+Confidence rules:
+- Use 0.9 or higher only when the request clearly fits exactly one type.
+- If the message is vague, has no clear request, or could fit more than one type, use a confidence below 0.6.
 
 Request: {text}
 """

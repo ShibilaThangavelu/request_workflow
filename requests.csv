@@ -1,0 +1,25 @@
+id,text,type,urgency,split
+1,"I was charged twice for my March bill and nobody has fixed it after three calls.",Complaint,medium,dev
+2,"Your agent was rude to me on the phone yesterday and hung up on me.",Complaint,medium,test
+3,"My internet has been dropping out every night for two weeks. This is unacceptable.",Complaint,medium,dev
+4,"I am furious. You cancelled my plan without telling me and now I have no service.",Complaint,high,dev
+5,"The app keeps crashing when I try to pay my bill. Very disappointed.",Complaint,low,dev
+6,"I waited 45 minutes on hold and then the call dropped.",Complaint,low,dev
+7,"You have sent my statement to the wrong address again. This is the third time.",Complaint,medium,dev
+8,"Someone has taken money from my account without my permission. I want this investigated today.",Complaint,high,test
+9,"What are your opening hours on public holidays?",General Enquiry,low,dev
+10,"Do you offer a student discount on your plans?",General Enquiry,low,test
+11,"How do I download my last 12 months of statements?",General Enquiry,low,dev
+12,"Can you tell me what documents I need to open an account?",General Enquiry,low,dev
+13,"Is there a fee for paying my bill by credit card?",General Enquiry,low,dev
+14,"Which branch is closest to Southbank?",General Enquiry,low,test
+15,"What is the difference between the Basic and Premium plans?",General Enquiry,low,dev
+16,"Do you have a phone number for international callers?",General Enquiry,low,test
+17,"Please update my address to 12 Smith Street, Richmond VIC 3121.",Service Request,low,dev
+18,"I would like to upgrade to the Premium plan from next month.",Service Request,low,test
+19,"Can you send me a copy of my tax invoice for June?",Service Request,low,dev
+20,"Please cancel my subscription at the end of this billing cycle.",Service Request,medium,dev
+21,"I need to change my direct debit date to the 15th.",Service Request,low,dev
+22,"Please reset my online account password, I am locked out.",Service Request,medium,test
+23,"I am travelling next week, please activate international roaming on my account.",Service Request,medium,dev
+24,"My card was stolen an hour ago. Please block it immediately.",Service Request,high,test

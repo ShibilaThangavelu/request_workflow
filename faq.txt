@@ -1,0 +1,8 @@
+SAMPLE FAQ (made up for this demo; not real company information)
+- Opening hours: Monday to Friday 8am to 6pm, Saturday 9am to 1pm. Closed on public holidays, but online help is available 24/7.
+- Student discount: Students get 10% off any plan with a valid student ID.
+- Statements: Log in, open Documents, choose Statements and select the last 12 months to download.
+- Opening an account: You need photo ID and proof of address, such as a utility bill or bank statement.
+- Card payments: Paying by credit card has a 1.5% fee. Bank transfer and direct debit are free.
+- Plans: Basic includes standard support. Premium adds priority support and a higher monthly allowance.
+- International callers: Call +61 3 5550 0100 (sample number).

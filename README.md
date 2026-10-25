@@ -47,14 +47,14 @@ Invalid output, an API error or confidence below 0.7 goes to **Needs Human Revie
 ## Remediation strategy
 | Branch | Steps | Follow-up |
 | --- | --- | --- |
-| Complaint | Tailored acknowledgement draft (held for human approval); escalate to a senior handler; log with a High priority flag | 2-hour reminder |
+| Complaint | Tailored acknowledgement sent to the customer; escalate to a senior handler; log with a High priority flag | 2-hour reminder |
 | General Enquiry | Answer from sample FAQ (`data/faq.txt`); log as resolved | None |
 | Service Request | Confirmation reply; create ticket, route to Service Desk | SLA timer, 1 business day |
 | Urgent Escalation | Urgent acknowledgement draft (held for human approval); Critical priority flag, alert supervisor, pause auto-resolution | 2 hours |
 | Needs Human Review | Hold automatic actions; queue for a human with the reason | Review in 4 hours |
 
-**Human approval:** replies for Complaint and Urgent Escalation are held (status "Held - awaiting approval"). A person approves, edits or rejects them in the Approvals tab; only then are they marked sent.
-**Reminders:** when a follow-up time passes and the case is not resolved, the app sends an escalation notification to the supervisor and queues an AI-drafted customer update for approval. Reminders fire when the page loads, with the "Run reminder check" button, or with "Simulate 2 hours passing" for demos. "Mark resolved" stops a case's reminder.
+**Human approval:** replies for Urgent Escalation are held (status "Held - awaiting approval"). A person approves, edits or rejects them in the Approvals tab; only then are they marked sent.
+**Reminders:** when a follow-up time passes and the case is not resolved, the app sends an escalation notification to the supervisor and, for complaints and urgent cases, queues an AI-drafted customer update for approval. Reminders fire when the page loads, with the "Run reminder check" button, or with "Simulate 2 hours passing" for demos. "Mark resolved" stops a case's reminder.
 
 Sending is simulated: replies and notifications are written to an outbox table, not emailed. Real sending would use SMTP or an email API. The FAQ is made-up sample content.
 

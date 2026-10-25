@@ -22,7 +22,10 @@ NEW_COLUMNS = {"draft_reply": "TEXT", "follow_up": "TEXT", "follow_up_due": "TEX
                "approval_status": "TEXT", "reminder_sent": "INTEGER DEFAULT 0", "resolved_at": "TEXT"}
 
 # Branches whose customer reply is held until a person approves it (human in the loop)
-APPROVAL_BRANCHES = {"Complaint", "Urgent Escalation"}
+APPROVAL_BRANCHES = {"Urgent Escalation"}
+
+# Branches that get a drafted customer update when their 2-hour reminder fires (held for approval)
+REMINDER_UPDATE_BRANCHES = {"Complaint", "Urgent Escalation"}
 
 # Priority flag set on the case log entry, following the urgency column in the brief
 PRIORITY = {
@@ -85,7 +88,7 @@ def send_message(case_id, kind, to_addr, subject, body, status="Sent (simulated)
         )
 
 
-def build_notification(case_id, branch, request, result, follow_up, due, priority):
+def build_notification(case_id, branch, request, result, follow_up, due, priority, ack=""):
     conf = result.get("confidence")
     lines = [
         "Case #" + str(case_id) + " | " + branch + " | PRIORITY: " + priority,
@@ -93,6 +96,7 @@ def build_notification(case_id, branch, request, result, follow_up, due, priorit
         "Type: " + str(result.get("type")) + " | Urgency: " + str(result.get("urgency"))
         + " | Confidence: " + (f"{conf:.2f}" if isinstance(conf, (int, float)) else "n/a"),
         "Model reason: " + str(result.get("reason")),
+        *(["Customer acknowledgement: " + ack] if ack else []),
         "Action needed: " + follow_up + (" (due " + due.replace("T", " ") + ")" if due else ""),
     ]
     return "\n".join(lines)
@@ -207,6 +211,12 @@ def process_request(request, customer_email="customer@example.com"):
         steps.append("Follow-up: " + follow_up)
 
     approval_status = "Pending approval" if needs_approval else "Not required"
+    if not reply:
+        ack_note = ""
+    elif needs_approval:
+        ack_note = "drafted, held for human approval (not yet sent)"
+    else:
+        ack_note = "sent to " + customer_email + " (simulated)"
     case_id = log_case(request, result, branch, steps, status, reply, follow_up, due, priority, approval_status)
 
     messages = []
@@ -217,7 +227,7 @@ def process_request(request, customer_email="customer@example.com"):
     if team:
         messages.append({"kind": "Internal notification", "to": team[1],
                          "subject": "[" + branch + "] Case #" + str(case_id),
-                         "body": build_notification(case_id, branch, request, result, follow_up, due, priority),
+                         "body": build_notification(case_id, branch, request, result, follow_up, due, priority, ack_note),
                          "status": "Sent (simulated)"})
     for m in messages:
         send_message(case_id, m["kind"], m["to"], m["subject"], m["body"], m["status"])
@@ -318,7 +328,7 @@ def check_reminders(extra_hours=0):
         send_message(case_id, "Escalation reminder", SUPERVISOR[1],
                      "[REMINDER] Case #" + str(case_id) + " is overdue (" + branch + ")", body)
         update = None
-        if branch in APPROVAL_BRANCHES:
+        if branch in REMINDER_UPDATE_BRANCHES:
             update = draft_reply(request, "Reminder")
             if update:
                 send_message(case_id, "Customer update (draft)", cust.get(case_id, "customer@example.com"),

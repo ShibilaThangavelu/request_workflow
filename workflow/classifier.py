@@ -79,5 +79,69 @@ def draft_reply(text, branch):
         return None
 
 
+ENQUIRY_PROMPT = """You answer customer enquiries for a service company.
+Customer enquiry: {text}
+
+FAQ:
+{faq}
+
+Return JSON with exactly these fields:
+- subtopic: 2 to 4 words naming what the enquiry is about, for example "student discount", "billing statements", "opening hours"
+- reply: one customer reply of at most 70 words. Polite, plain language. Start with "Hi," and end with "Customer Care Team". Answer using only the FAQ above. If the FAQ does not cover the question, say a team member will confirm the answer by email. Do not invent facts, names, prices or timeframes."""
+
+
+def draft_enquiry(text):
+    """Classify the enquiry's sub-topic and draft an FAQ-based reply in one call.
+
+    Returns (subtopic, reply); either is None if the API call or the JSON fails.
+    """
+    try:
+        response = client.models.generate_content(
+            model=MODEL,
+            contents=ENQUIRY_PROMPT.format(text=text, faq=FAQ),
+            config=types.GenerateContentConfig(response_mime_type="application/json", temperature=0.3),
+        )
+        data = json.loads(response.text)
+        subtopic = str(data.get("subtopic") or "").strip() or None
+        reply = str(data.get("reply") or "").strip() or None
+        return subtopic, reply
+    except Exception:
+        return None, None
+
+
+DEPARTMENTS = ["Billing", "Account Services", "Technical Support", "Plan Changes", "Service Desk"]
+
+SERVICE_PROMPT = """You triage service requests for a service company's operations team.
+Customer request: {text}
+
+Return JSON with exactly these fields:
+- summary: one sentence stating what the customer wants done, including every specific detail they gave (for example a new address or a date). Add no details they did not give.
+- department: exactly one of: Billing, Account Services, Technical Support, Plan Changes, Service Desk. Billing is for payments, invoices and refunds. Account Services is for changing personal or account details. Technical Support is for faults and setup help. Plan Changes is for upgrading, downgrading or cancelling a plan. Service Desk is for anything else.
+- reply: one customer reply of at most 70 words. Polite, plain language. Start with "Hi," and end with "Customer Care Team". Confirm you received the request, restate what they asked for using only their own words, say it has been passed to the department you chose, and say it will be actioned within 1 business day. Do not invent facts, names, prices or timeframes."""
+
+
+def draft_service_request(text):
+    """Extract the request details, choose the department and draft the confirmation in one call.
+
+    Returns (summary, department, reply); fields are None if the call or the JSON fails.
+    The department is always one of DEPARTMENTS (Service Desk if the model drifts).
+    """
+    try:
+        response = client.models.generate_content(
+            model=MODEL,
+            contents=SERVICE_PROMPT.format(text=text),
+            config=types.GenerateContentConfig(response_mime_type="application/json", temperature=0.3),
+        )
+        data = json.loads(response.text)
+        summary = str(data.get("summary") or "").strip() or None
+        department = str(data.get("department") or "").strip()
+        if department not in DEPARTMENTS:
+            department = "Service Desk"
+        reply = str(data.get("reply") or "").strip() or None
+        return summary, department, reply
+    except Exception:
+        return None, None, None
+
+
 if __name__ == "__main__":
     print(classify("I was charged twice for my March bill and nobody has fixed it."))

@@ -1,3 +1,4 @@
+import pandas as pd
 import streamlit as st
 
 from common import read, due_state
@@ -26,9 +27,14 @@ fu = read(
 if fu.empty:
     st.caption("No follow-ups yet.")
 else:
-    fu["state"] = fu.apply(
-        lambda r: "Resolved" if r["resolved_at"] else ("Reminder sent" if r["reminder_sent"] else due_state(r["follow_up_due"])),
-        axis=1)
+    def state_of(r):
+        if pd.notna(r["resolved_at"]):
+            return "Resolved"
+        if pd.notna(r["reminder_sent"]) and int(r["reminder_sent"]) == 1:
+            return "Reminder sent"
+        return due_state(r["follow_up_due"])
+
+    fu["state"] = fu.apply(state_of, axis=1)
     st.dataframe(fu[["case_id", "branch", "priority", "follow_up", "follow_up_due", "state"]], hide_index=True)
 
 open_cases = read("SELECT id FROM cases WHERE resolved_at IS NULL ORDER BY id DESC LIMIT 50")

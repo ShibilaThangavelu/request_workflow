@@ -1,0 +1,45 @@
+{
+  "case_id": 5,
+  "branch": "Needs Human Review",
+  "steps": [
+    "Held all automatic actions because the classification was uncertain or invalid",
+    "Queued for a human agent with the model's reason attached",
+    "Sent a routing notification to Human Review Queue (simulated)",
+    "Set follow-up: A human agent reviews the case within 4 hours (due 2026-10-25 17:18)"
+  ],
+  "status": "Waiting - Human Review",
+  "result": {
+    "type": "General Enquiry",
+    "urgency": "low",
+    "confidence": 0.4,
+    "reason": "The message is too vague to determine what the customer is asking about."
+  },
+  "reply": null,
+  "follow_up": "A human agent reviews the case within 4 hours",
+  "follow_up_due": "2026-10-25T17:18",
+  "messages": [
+    {
+      "kind": "Internal notification",
+      "to": "human-review@sample-company.example",
+      "subject": "[Needs Human Review] Case #5",
+      "body": "Case #5 | Needs Human Review | PRIORITY: Pending review\nRequest: Hi, about my thing from last week\nType: General Enquiry | Urgency: low | Confidence: 0.40\nModel reason: The message is too vague to determine what the customer is asking about.\nAction needed: A human agent reviews the case within 4 hours (due 2026-10-25 17:18)",
+      "status": "Sent (simulated)"
+    }
+  ],
+  "priority": "Pending review",
+  "needs_approval": false,
+  "engine": "local Python",
+  "case_log": {
+    "case_id": 5,
+    "logged_at": "2026-10-25T13:18:05",
+    "branch": "Needs Human Review",
+    "type": "General Enquiry",
+    "urgency": "low",
+    "subtopic": null,
+    "department": null,
+    "priority": "Pending review",
+    "status": "Waiting - Human Review",
+    "follow_up": "A human agent reviews the case within 4 hours",
+    "follow_up_due": "2026-10-25T17:18"
+  }
+}

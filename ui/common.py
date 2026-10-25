@@ -11,9 +11,12 @@ import pandas as pd
 
 from workflow.branches import DB_PATH, TEAMS, SUPERVISOR
 
-# internal address -> team name, used for the Team inbox "channels"
-TEAM_BY_ADDRESS = {addr: name for name, addr in TEAMS.values()}
-TEAM_BY_ADDRESS[SUPERVISOR[1]] = SUPERVISOR[0]
+# internal address -> team name, used for the Team inbox "channels" (in tab order)
+from workflow.branches import DEPARTMENT_TEAMS
+
+TEAM_BY_ADDRESS = {}
+for _name, _addr in [TEAMS["Complaint"], SUPERVISOR, TEAMS["Needs Human Review"]] + list(DEPARTMENT_TEAMS.values()):
+    TEAM_BY_ADDRESS[_addr] = _name
 
 
 def read(sql, params=()):

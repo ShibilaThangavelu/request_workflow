@@ -1,0 +1,54 @@
+{
+  "case_id": 2,
+  "branch": "Service Request",
+  "steps": [
+    "Extracted the request details: The customer wants to update their address to 12 Smith Street, Richmond VIC 3121.",
+    "Generated a confirmation reply that restates the request",
+    "Created a ticket and routed it to the Account Services team",
+    "Sent the reply to customer@example.com (simulated)",
+    "Sent a routing notification to Account Services (simulated)",
+    "Set follow-up: SLA timer: the department actions the request within 1 business day (due 2026-10-26 13:16)"
+  ],
+  "status": "Open - Account Services",
+  "result": {
+    "type": "Service Request",
+    "urgency": "low",
+    "confidence": 0.95,
+    "reason": "The customer is asking to update their address on their account."
+  },
+  "reply": "Hi, we received your request to update your address to 12 Smith Street, Richmond VIC 3121. This has been passed to our Account Services team and will be actioned within 1 business day. Customer Care Team",
+  "follow_up": "SLA timer: the department actions the request within 1 business day",
+  "follow_up_due": "2026-10-26T13:16",
+  "messages": [
+    {
+      "kind": "Customer reply",
+      "to": "customer@example.com",
+      "subject": "Re: your request (case #2)",
+      "body": "Hi, we received your request to update your address to 12 Smith Street, Richmond VIC 3121. This has been passed to our Account Services team and will be actioned within 1 business day. Customer Care Team",
+      "status": "Sent (simulated)"
+    },
+    {
+      "kind": "Internal notification",
+      "to": "account-services@sample-company.example",
+      "subject": "[Service Request] Case #2",
+      "body": "Case #2 | Service Request | PRIORITY: Medium\nRequest: Please update my address to 12 Smith Street, Richmond VIC 3121.\nType: Service Request | Urgency: low | Confidence: 0.95\nModel reason: The customer is asking to update their address on their account.\nDepartment: Account Services\nRequest details: The customer wants to update their address to 12 Smith Street, Richmond VIC 3121.\nCustomer acknowledgement: sent to customer@example.com (simulated)\nAction needed: SLA timer: the department actions the request within 1 business day (due 2026-10-26 13:16)",
+      "status": "Sent (simulated)"
+    }
+  ],
+  "priority": "Medium",
+  "needs_approval": false,
+  "engine": "local Python",
+  "case_log": {
+    "case_id": 2,
+    "logged_at": "2026-10-25T13:16:59",
+    "branch": "Service Request",
+    "type": "Service Request",
+    "urgency": "low",
+    "subtopic": null,
+    "department": "Account Services",
+    "priority": "Medium",
+    "status": "Open - Account Services",
+    "follow_up": "SLA timer: the department actions the request within 1 business day",
+    "follow_up_due": "2026-10-26T13:16"
+  }
+}

@@ -2,7 +2,8 @@ import os
 import sqlite3
 import sys
 from datetime import datetime, timedelta
-from workflow.classifier import classify, draft_reply
+from workflow import n8n_client
+from workflow.classifier import classify, draft_reply, draft_enquiry, draft_service_request, DEPARTMENTS
 
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "cases.db")
 MIN_CONFIDENCE = 0.7
@@ -13,13 +14,13 @@ URGENCIES = {"low", "medium", "high"}
 FOLLOW_UPS = {
     "Complaint": ("2-hour reminder: senior handler checks the complaint is being resolved", 2),
     "General Enquiry": ("No follow-up needed: resolved with an automatic reply", None),
-    "Service Request": ("SLA timer: Service Desk actions the request within 1 business day", 24),
+    "Service Request": ("SLA timer: the department actions the request within 1 business day", 24),
     "Urgent Escalation": ("2-hour follow-up by the priority team; automatic resolution paused", 2),
     "Needs Human Review": ("A human agent reviews the case within 4 hours", 4),
 }
 
 NEW_COLUMNS = {"draft_reply": "TEXT", "follow_up": "TEXT", "follow_up_due": "TEXT", "priority": "TEXT",
-               "approval_status": "TEXT", "reminder_sent": "INTEGER DEFAULT 0", "resolved_at": "TEXT"}
+               "approval_status": "TEXT", "subtopic": "TEXT", "department": "TEXT", "n8n_resume_url": "TEXT", "reminder_sent": "INTEGER DEFAULT 0", "resolved_at": "TEXT"}
 
 # Branches whose customer reply is held until a person approves it (human in the loop)
 APPROVAL_BRANCHES = {"Urgent Escalation"}
@@ -46,6 +47,9 @@ TEAMS = {
     "Needs Human Review": ("Human Review Queue", "human-review@sample-company.example"),
 }
 
+# Service requests are routed to the department the AI chooses: name -> (display name, sample address)
+DEPARTMENT_TEAMS = {d: (d, d.lower().replace(" ", "-") + "@sample-company.example") for d in DEPARTMENTS}
+
 
 def init_db():
     with sqlite3.connect(DB_PATH) as db:
@@ -67,15 +71,23 @@ def init_db():
                 db.execute("ALTER TABLE cases ADD COLUMN " + column + " " + kind)
 
 
-def log_case(request, result, branch, steps, status, reply, follow_up, due, priority, approval_status):
+def next_case_id():
+    with sqlite3.connect(DB_PATH) as db:
+        return (db.execute("SELECT COALESCE(MAX(id), 0) FROM cases").fetchone()[0] or 0) + 1
+
+
+def log_case(request, result, branch, steps, status, reply, follow_up, due, priority, approval_status,
+             subtopic=None, case_id=None, department=None):
+    columns = ("created_at, request, type, urgency, confidence, reason, branch, steps, status, "
+               "draft_reply, follow_up, follow_up_due, priority, approval_status, subtopic, department")
+    values = (datetime.now().isoformat(timespec="seconds"), request, result.get("type"), result.get("urgency"),
+              result.get("confidence"), result.get("reason"), branch, " | ".join(steps), status,
+              reply, follow_up, due, priority, approval_status, subtopic, department)
+    if case_id is not None:
+        columns, values = "id, " + columns, (case_id,) + values
     with sqlite3.connect(DB_PATH) as db:
         cur = db.execute(
-            "INSERT INTO cases (created_at, request, type, urgency, confidence, reason, branch, steps, status, "
-            "draft_reply, follow_up, follow_up_due, priority, approval_status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (datetime.now().isoformat(timespec="seconds"), request, result.get("type"), result.get("urgency"),
-             result.get("confidence"), result.get("reason"), branch, " | ".join(steps), status,
-             reply, follow_up, due, priority, approval_status),
-        )
+            "INSERT INTO cases (" + columns + ") VALUES (" + ",".join("?" * len(values)) + ")", values)
         return cur.lastrowid
 
 
@@ -88,7 +100,7 @@ def send_message(case_id, kind, to_addr, subject, body, status="Sent (simulated)
         )
 
 
-def build_notification(case_id, branch, request, result, follow_up, due, priority, ack=""):
+def build_notification(case_id, branch, request, result, follow_up, due, priority, ack="", details=()):
     conf = result.get("confidence")
     lines = [
         "Case #" + str(case_id) + " | " + branch + " | PRIORITY: " + priority,
@@ -96,6 +108,7 @@ def build_notification(case_id, branch, request, result, follow_up, due, priorit
         "Type: " + str(result.get("type")) + " | Urgency: " + str(result.get("urgency"))
         + " | Confidence: " + (f"{conf:.2f}" if isinstance(conf, (int, float)) else "n/a"),
         "Model reason: " + str(result.get("reason")),
+        *details,
         *(["Customer acknowledgement: " + ack] if ack else []),
         "Action needed: " + follow_up + (" (due " + due.replace("T", " ") + ")" if due else ""),
     ]
@@ -122,7 +135,7 @@ def general_enquiry(request, reply):
         reply_step(reply, "an answer from the FAQ knowledge base"),
         "Logged as resolved",
     ]
-    return steps, "Answered - automatic reply"
+    return steps, "Resolved"
 
 
 def service_request(request, reply):
@@ -179,7 +192,7 @@ def route(result):
     return result["type"]
 
 
-def process_request(request, customer_email="customer@example.com"):
+def process_request_local(request, customer_email="customer@example.com"):
     init_db()
     try:
         result = classify(request)
@@ -189,10 +202,29 @@ def process_request(request, customer_email="customer@example.com"):
     branch = route(result)
     fn = BRANCH_FUNCTIONS[branch]
 
-    reply = draft_reply(request, branch)
+    subtopic = summary = department = None
+    if branch == "General Enquiry":
+        subtopic, reply = draft_enquiry(request)
+        if reply is None:
+            reply = draft_reply(request, branch)
+    elif branch == "Service Request":
+        summary, department, reply = draft_service_request(request)
+        if reply is None:
+            reply = draft_reply(request, branch)
+    else:
+        reply = draft_reply(request, branch)
     steps, status = fn(request, reply)
+    if subtopic:
+        steps.insert(0, "Classified the sub-topic: " + subtopic)
+    if branch == "Service Request":
+        department = department or "Service Desk"
+        steps = ([("Extracted the request details: " + summary)] if summary else []) + [
+            reply_step(reply, "a confirmation reply that restates the request"),
+            "Created a ticket and routed it to the " + department + " team",
+        ]
+        status = "Open - " + department
 
-    team = TEAMS.get(branch)
+    team = DEPARTMENT_TEAMS[department] if department else TEAMS.get(branch)
     needs_approval = branch in APPROVAL_BRANCHES and bool(reply)
     if reply and needs_approval:
         steps.append("Held the reply for human approval (not sent yet)")
@@ -217,7 +249,10 @@ def process_request(request, customer_email="customer@example.com"):
         ack_note = "drafted, held for human approval (not yet sent)"
     else:
         ack_note = "sent to " + customer_email + " (simulated)"
-    case_id = log_case(request, result, branch, steps, status, reply, follow_up, due, priority, approval_status)
+    case_id = log_case(request, result, branch, steps, status, reply, follow_up, due, priority, approval_status,
+                       subtopic, department=department)
+    if branch == "General Enquiry":
+        resolve_case(case_id, notify=False)  # nothing left to do, so it is closed straight away
 
     messages = []
     if reply:
@@ -227,7 +262,8 @@ def process_request(request, customer_email="customer@example.com"):
     if team:
         messages.append({"kind": "Internal notification", "to": team[1],
                          "subject": "[" + branch + "] Case #" + str(case_id),
-                         "body": build_notification(case_id, branch, request, result, follow_up, due, priority, ack_note),
+                         "body": build_notification(case_id, branch, request, result, follow_up, due, priority, ack_note,
+                                            ["Department: " + department, "Request details: " + (summary or "-")] if department else ()),
                          "status": "Sent (simulated)"})
     for m in messages:
         send_message(case_id, m["kind"], m["to"], m["subject"], m["body"], m["status"])
@@ -235,13 +271,73 @@ def process_request(request, customer_email="customer@example.com"):
     return {
         "case_id": case_id, "branch": branch, "steps": steps, "status": status,
         "result": result, "reply": reply, "follow_up": follow_up, "follow_up_due": due,
-        "messages": messages, "priority": priority, "needs_approval": needs_approval,
+        "messages": messages, "priority": priority, "needs_approval": needs_approval, "engine": "local Python",
         "case_log": {
             "case_id": case_id, "logged_at": datetime.now().isoformat(timespec="seconds"),
-            "branch": branch, "type": result.get("type"), "urgency": result.get("urgency"),
-            "priority": priority, "status": status, "follow_up": follow_up, "follow_up_due": due,
+            "branch": branch, "type": result.get("type"), "urgency": result.get("urgency"), "subtopic": subtopic,
+            "department": department, "priority": priority, "status": status, "follow_up": follow_up, "follow_up_due": due,
         },
     }
+
+
+def process_request_n8n(request, customer_email="customer@example.com"):
+    """Run the request through the n8n workflow, then record the result locally for the app's pages."""
+    init_db()
+    case_id = next_case_id()
+    payload = {"request": request, "customer_email": customer_email, "case_id": case_id}
+    override = n8n_client.reminder_override()
+    if override is not None:
+        payload["reminder_minutes_override"] = override
+    pack = n8n_client.run_workflow(payload)
+
+    steps = list(pack["steps"])
+    follow_up, hours = pack["follow_up"], pack.get("follow_up_hours")
+    minutes = pack.get("reminder_minutes")
+    due = None
+    if minutes is not None:
+        due = (datetime.now() + timedelta(minutes=float(minutes))).isoformat(timespec="minutes")
+        steps.append("Set follow-up: " + follow_up + " (due " + due.replace("T", " ") + ")")
+    else:
+        steps.append("Follow-up: " + follow_up)
+
+    result = pack["result"]
+    needs_approval = bool(pack.get("needs_approval"))
+    approval_status = "Pending approval" if needs_approval else "Not required"
+    log_case(request, result, pack["branch"], steps, pack["status"], pack.get("reply"), follow_up, due,
+             pack["priority"], approval_status, pack.get("subtopic"), case_id=case_id, department=pack.get("department"))
+    if pack.get("resume_url"):
+        with sqlite3.connect(DB_PATH) as db:
+            db.execute("UPDATE cases SET n8n_resume_url = ? WHERE id = ?", (pack["resume_url"], case_id))
+    messages = pack.get("messages", [])
+    for m in messages:
+        send_message(case_id, m["kind"], m["to"], m["subject"], m["body"], m["status"])
+    if pack["branch"] == "General Enquiry":
+        resolve_case(case_id, notify=False)
+
+    return {
+        "case_id": case_id, "branch": pack["branch"], "steps": steps, "status": pack["status"],
+        "result": result, "reply": pack.get("reply"), "follow_up": follow_up, "follow_up_due": due,
+        "messages": messages, "priority": pack["priority"], "needs_approval": needs_approval,
+        "engine": "n8n workflow",
+        "case_log": {
+            "case_id": case_id, "logged_at": datetime.now().isoformat(timespec="seconds"),
+            "branch": pack["branch"], "type": result.get("type"), "urgency": result.get("urgency"),
+            "subtopic": pack.get("subtopic"), "department": pack.get("department"), "priority": pack["priority"], "status": pack["status"],
+            "follow_up": follow_up, "follow_up_due": due,
+        },
+    }
+
+
+def process_request(request, customer_email="customer@example.com"):
+    """Use the n8n workflow when N8N_WEBHOOK_URL is set; otherwise (or if n8n is unreachable) run locally."""
+    if n8n_client.enabled():
+        try:
+            return process_request_n8n(request, customer_email)
+        except Exception as e:
+            out = process_request_local(request, customer_email)
+            out["engine"] = "local Python (n8n unavailable: " + str(e)[:80] + ")"
+            return out
+    return process_request_local(request, customer_email)
 
 
 # ---------- human approval ----------
@@ -258,21 +354,26 @@ def pending_approvals():
 
 
 def approve_reply(outbox_id, edited_body=None):
-    """Release a held reply (optionally edited) so it is 'sent' (simulated)."""
+    """Release a held reply (optionally edited). With n8n it is emailed through n8n; otherwise it is 'sent' (simulated)."""
     with sqlite3.connect(DB_PATH) as db:
-        row = db.execute("SELECT case_id, kind FROM outbox WHERE id = ?", (outbox_id,)).fetchone()
+        row = db.execute("SELECT case_id, kind, to_addr, subject, body FROM outbox WHERE id = ?", (outbox_id,)).fetchone()
         if not row:
             return
-        body = edited_body.strip() if edited_body and edited_body.strip() else None
-        if body:
-            db.execute("UPDATE outbox SET body = ?, status = 'Sent (simulated) - approved and edited' WHERE id = ?",
-                       (body, outbox_id))
-        else:
-            db.execute("UPDATE outbox SET status = 'Sent (simulated) - approved' WHERE id = ?", (outbox_id,))
-        if row[1] == "Customer reply":
+        case_id, kind, to_addr, subject, body = row
+        edited = edited_body.strip() if edited_body and edited_body.strip() else None
+        final_body = edited or body
+        sent_via = "Sent (simulated)"
+        if n8n_client.enabled():
+            try:
+                n8n_client.send_email(to_addr, subject, final_body, case_id)
+                sent_via = "Sent (email)"
+            except Exception:
+                sent_via = "Sent (simulated; n8n email failed)"
+        status = sent_via + (" - approved and edited" if edited else " - approved")
+        db.execute("UPDATE outbox SET body = ?, status = ? WHERE id = ?", (final_body, status, outbox_id))
+        if kind == "Customer reply":
             db.execute("UPDATE cases SET approval_status = 'Approved', "
-                       "steps = steps || ' | A person approved the reply and it was sent (simulated)' WHERE id = ?",
-                       (row[0],))
+                       "steps = steps || ' | A person approved the reply and it was sent' WHERE id = ?", (case_id,))
 
 
 def reject_reply(outbox_id):
@@ -289,11 +390,17 @@ def reject_reply(outbox_id):
 
 
 # ---------- follow-up reminders and resolving ----------
-def resolve_case(case_id):
-    """Close a case so no more reminders fire for it."""
+def resolve_case(case_id, notify=True):
+    """Close a case so no more reminders fire for it (and cancel the n8n reminder when n8n is used)."""
     with sqlite3.connect(DB_PATH) as db:
         db.execute("UPDATE cases SET resolved_at = ?, status = 'Resolved' WHERE id = ?",
                    (datetime.now().isoformat(timespec="seconds"), case_id))
+        row = db.execute("SELECT n8n_resume_url FROM cases WHERE id = ?", (case_id,)).fetchone()
+    if notify and row and row[0]:
+        try:
+            n8n_client.notify_resolved(row[0])
+        except Exception:
+            pass  # the case is resolved here either way; the n8n reminder may still fire
 
 
 def check_reminders(extra_hours=0):

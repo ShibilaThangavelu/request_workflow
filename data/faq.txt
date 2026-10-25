@@ -6,3 +6,13 @@ SAMPLE FAQ (made up for this demo; not real company information)
 - Card payments: Paying by credit card has a 1.5% fee. Bank transfer and direct debit are free.
 - Plans: Basic includes standard support. Premium adds priority support and a higher monthly allowance.
 - International callers: Call +61 3 5550 0100 (sample number).
+- Late payment: Bills are due 14 days after the statement date. A late fee of $10 applies after that.
+- Changing plans: You can change plan at any time from your account. The new plan starts on your next billing date.
+- Cancelling: Cancel any time from your account or by phone. There are no exit fees on month-to-month plans.
+- Direct debit: Set up direct debit in your account under Payments. It takes effect from the next bill.
+- Updating details: Change your address, phone number or email in your account under Profile.
+- Lost or stolen card: Call the 24/7 line straight away so the card can be blocked. A replacement arrives in 5 business days.
+- Refunds: Refunds for billing errors are returned to the original payment method within 7 business days.
+- Making a complaint: You can complain by phone, email or online. We acknowledge every complaint on the day we receive it.
+- Online account: Register with your account number and email. A reset link is sent if you forget your password.
+- Service outages: Check the status page for known outages. We post updates every hour until service is restored.

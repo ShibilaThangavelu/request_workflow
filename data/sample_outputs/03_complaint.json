@@ -1,0 +1,54 @@
+{
+  "case_id": 3,
+  "branch": "Complaint",
+  "steps": [
+    "Generated a tailored apology and acknowledgement reply",
+    "Escalated to a senior handler",
+    "Logged the case with a High priority flag",
+    "Sent the reply to customer@example.com (simulated)",
+    "Sent a routing notification to Senior Handler (simulated)",
+    "Set follow-up: 2-hour reminder: senior handler checks the complaint is being resolved (due 2026-10-25 15:17)"
+  ],
+  "status": "Escalated - Senior Handler",
+  "result": {
+    "type": "Complaint",
+    "urgency": "medium",
+    "confidence": 0.95,
+    "reason": "The customer is unhappy about a billing error that was not fixed after multiple previous contacts."
+  },
+  "reply": "Hi,\n\nI am so sorry to hear you were charged twice for your March bill and that this has not been fixed after three calls. We have received your complaint and understand how frustrating this is. \n\nI have now passed this on to a senior member of our team, who will follow up with you.\n\nCustomer Care Team",
+  "follow_up": "2-hour reminder: senior handler checks the complaint is being resolved",
+  "follow_up_due": "2026-10-25T15:17",
+  "messages": [
+    {
+      "kind": "Customer reply",
+      "to": "customer@example.com",
+      "subject": "Re: your request (case #3)",
+      "body": "Hi,\n\nI am so sorry to hear you were charged twice for your March bill and that this has not been fixed after three calls. We have received your complaint and understand how frustrating this is. \n\nI have now passed this on to a senior member of our team, who will follow up with you.\n\nCustomer Care Team",
+      "status": "Sent (simulated)"
+    },
+    {
+      "kind": "Internal notification",
+      "to": "senior-handler@sample-company.example",
+      "subject": "[Complaint] Case #3",
+      "body": "Case #3 | Complaint | PRIORITY: High\nRequest: I was charged twice for my March bill and nobody has fixed it after three calls.\nType: Complaint | Urgency: medium | Confidence: 0.95\nModel reason: The customer is unhappy about a billing error that was not fixed after multiple previous contacts.\nCustomer acknowledgement: sent to customer@example.com (simulated)\nAction needed: 2-hour reminder: senior handler checks the complaint is being resolved (due 2026-10-25 15:17)",
+      "status": "Sent (simulated)"
+    }
+  ],
+  "priority": "High",
+  "needs_approval": false,
+  "engine": "local Python",
+  "case_log": {
+    "case_id": 3,
+    "logged_at": "2026-10-25T13:17:21",
+    "branch": "Complaint",
+    "type": "Complaint",
+    "urgency": "medium",
+    "subtopic": null,
+    "department": null,
+    "priority": "High",
+    "status": "Escalated - Senior Handler",
+    "follow_up": "2-hour reminder: senior handler checks the complaint is being resolved",
+    "follow_up_due": "2026-10-25T15:17"
+  }
+}

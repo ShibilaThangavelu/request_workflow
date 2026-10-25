@@ -1,0 +1,1165 @@
+{
+  "id": "RequestWorkflow01",
+  "name": "Incoming Request Processing Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "request-workflow",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "node-1",
+      "name": "Receive request",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        380
+      ],
+      "webhookId": "request-workflow-intake"
+    },
+    {
+      "parameters": {
+        "jsCode": "const PROMPT = \"You classify customer requests for a service company.\\nReturn JSON with exactly these fields:\\n- type: one of \\\"Complaint\\\", \\\"General Enquiry\\\", \\\"Service Request\\\"\\n- urgency: one of \\\"low\\\", \\\"medium\\\", \\\"high\\\"\\n- confidence: a number from 0 to 1\\n- reason: one short sentence\\n\\nDefinitions:\\n- Complaint: the customer is unhappy about something that went wrong.\\n- General Enquiry: the customer asks for information. Nothing needs to be done on their account.\\n- Service Request: the customer asks us to do or change something on their account.\\nUrgency rules:\\n- high: fraud or money taken without permission, a lost or stolen card, a complete loss of service or account access, or the customer says they need action immediately or today.\\n- medium: a problem that has gone on for days, happened more than once, or was not fixed after earlier contact, but the customer can still use the service. Also requests tied to a deadline or an upcoming trip.\\n- low: general questions, routine changes, and minor annoyances.\\nDo not use high for a bad experience alone. Anger or disappointment does not make a request high.\\nConfidence rules:\\n- Use 0.9 or higher only when the request clearly fits exactly one type.\\n- If the message is vague, has no clear request, or could fit more than one type, use a confidence below 0.6.\\n\\nRequest: {text}\\n\";\nconst REPLY_PROMPT = \"You write short customer replies for an operations team.\\nWrite one reply of at most 70 words to the customer request below.\\nRules:\\n- Polite, plain language. Start with \\\"Hi,\\\" and end with \\\"Customer Care Team\\\".\\n- What the reply must do: {instruction}\\n- Do not invent facts, names, prices or timeframes that are not in these instructions or the FAQ.\\n\\nCustomer request: {text}\\n{extra}\";\nconst ENQUIRY_PROMPT = \"You answer customer enquiries for a service company.\\nCustomer enquiry: {text}\\n\\nFAQ:\\n{faq}\\n\\nReturn JSON with exactly these fields:\\n- subtopic: 2 to 4 words naming what the enquiry is about, for example \\\"student discount\\\", \\\"billing statements\\\", \\\"opening hours\\\"\\n- reply: one customer reply of at most 70 words. Polite, plain language. Start with \\\"Hi,\\\" and end with \\\"Customer Care Team\\\". Answer using only the FAQ above. If the FAQ does not cover the question, say a team member will confirm the answer by email. Do not invent facts, names, prices or timeframes.\";\nconst SERVICE_PROMPT = \"You triage service requests for a service company's operations team.\\nCustomer request: {text}\\n\\nReturn JSON with exactly these fields:\\n- summary: one sentence stating what the customer wants done, including every specific detail they gave (for example a new address or a date). Add no details they did not give.\\n- department: exactly one of: Billing, Account Services, Technical Support, Plan Changes, Service Desk. Billing is for payments, invoices and refunds. Account Services is for changing personal or account details. Technical Support is for faults and setup help. Plan Changes is for upgrading, downgrading or cancelling a plan. Service Desk is for anything else.\\n- reply: one customer reply of at most 70 words. Polite, plain language. Start with \\\"Hi,\\\" and end with \\\"Customer Care Team\\\". Confirm you received the request, restate what they asked for using only their own words, say it has been passed to the department you chose, and say it will be actioned within 1 business day. Do not invent facts, names, prices or timeframes.\";\nconst DEPARTMENTS = [\"Billing\", \"Account Services\", \"Technical Support\", \"Plan Changes\", \"Service Desk\"];\nconst INSTR = {\"Complaint\": \"Apologise, show you understand the specific problem, confirm you received the complaint, and say it has been passed to a senior member of the team who will follow up. Do not give a timeframe.\", \"General Enquiry\": \"Answer using only the FAQ below. If the FAQ does not cover the question, say a team member will confirm the answer by email.\", \"Service Request\": \"Confirm you received the request, restate what they asked for using only their own words (add no details they did not give), and say it will be actioned within 1 business day.\", \"Reminder\": \"Apologise for the wait, say the case is still open and a senior member of the team is following it up, and say they will hear from the team again soon. Do not give a timeframe.\", \"Urgent Escalation\": \"Acknowledge the urgency, say the case has been escalated to a priority team, and say someone will contact them within 2 hours.\"};\nconst FAQ = \"SAMPLE FAQ (made up for this demo; not real company information)\\n- Opening hours: Monday to Friday 8am to 6pm, Saturday 9am to 1pm. Closed on public holidays, but online help is available 24/7.\\n- Student discount: Students get 10% off any plan with a valid student ID.\\n- Statements: Log in, open Documents, choose Statements and select the last 12 months to download.\\n- Opening an account: You need photo ID and proof of address, such as a utility bill or bank statement.\\n- Card payments: Paying by credit card has a 1.5% fee. Bank transfer and direct debit are free.\\n- Plans: Basic includes standard support. Premium adds priority support and a higher monthly allowance.\\n- International callers: Call +61 3 5550 0100 (sample number).\\n- Late payment: Bills are due 14 days after the statement date. A late fee of $10 applies after that.\\n- Changing plans: You can change plan at any time from your account. The new plan starts on your next billing date.\\n- Cancelling: Cancel any time from your account or by phone. There are no exit fees on month-to-month plans.\\n- Direct debit: Set up direct debit in your account under Payments. It takes effect from the next bill.\\n- Updating details: Change your address, phone number or email in your account under Profile.\\n- Lost or stolen card: Call the 24/7 line straight away so the card can be blocked. A replacement arrives in 5 business days.\\n- Refunds: Refunds for billing errors are returned to the original payment method within 7 business days.\\n- Making a complaint: You can complain by phone, email or online. We acknowledge every complaint on the day we receive it.\\n- Online account: Register with your account number and email. A reset link is sent if you forget your password.\\n- Service outages: Check the status page for known outages. We post updates every hour until service is restored.\\n\";\nconst b = $input.first().json.body || $input.first().json;\nconst request = String(b.request || '').trim();\nif (!request) { throw new Error('No request text received'); }\nconst prompt = PROMPT.replace('{text}', () => request);\nconst ov = b.reminder_minutes_override;\nreturn [{ json: {\n  request,\n  customer_email: b.customer_email || 'customer@example.com',\n  case_id: (b.case_id !== undefined && b.case_id !== null) ? b.case_id : ('N8N-' + $execution.id),\n  reminder_override: (ov === undefined || ov === null || ov === '') ? null : Number(ov),\n  classifyBody: { contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: 'application/json', temperature: 0 } }\n} }];\n"
+      },
+      "id": "node-2",
+      "name": "Prepare request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        250,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.classifyBody) }}",
+        "options": {
+          "timeout": 60000
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "id": "node-3",
+      "name": "Gemini: classify",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        500,
+        380
+      ],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "Gemini API key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const PROMPT = \"You classify customer requests for a service company.\\nReturn JSON with exactly these fields:\\n- type: one of \\\"Complaint\\\", \\\"General Enquiry\\\", \\\"Service Request\\\"\\n- urgency: one of \\\"low\\\", \\\"medium\\\", \\\"high\\\"\\n- confidence: a number from 0 to 1\\n- reason: one short sentence\\n\\nDefinitions:\\n- Complaint: the customer is unhappy about something that went wrong.\\n- General Enquiry: the customer asks for information. Nothing needs to be done on their account.\\n- Service Request: the customer asks us to do or change something on their account.\\nUrgency rules:\\n- high: fraud or money taken without permission, a lost or stolen card, a complete loss of service or account access, or the customer says they need action immediately or today.\\n- medium: a problem that has gone on for days, happened more than once, or was not fixed after earlier contact, but the customer can still use the service. Also requests tied to a deadline or an upcoming trip.\\n- low: general questions, routine changes, and minor annoyances.\\nDo not use high for a bad experience alone. Anger or disappointment does not make a request high.\\nConfidence rules:\\n- Use 0.9 or higher only when the request clearly fits exactly one type.\\n- If the message is vague, has no clear request, or could fit more than one type, use a confidence below 0.6.\\n\\nRequest: {text}\\n\";\nconst REPLY_PROMPT = \"You write short customer replies for an operations team.\\nWrite one reply of at most 70 words to the customer request below.\\nRules:\\n- Polite, plain language. Start with \\\"Hi,\\\" and end with \\\"Customer Care Team\\\".\\n- What the reply must do: {instruction}\\n- Do not invent facts, names, prices or timeframes that are not in these instructions or the FAQ.\\n\\nCustomer request: {text}\\n{extra}\";\nconst ENQUIRY_PROMPT = \"You answer customer enquiries for a service company.\\nCustomer enquiry: {text}\\n\\nFAQ:\\n{faq}\\n\\nReturn JSON with exactly these fields:\\n- subtopic: 2 to 4 words naming what the enquiry is about, for example \\\"student discount\\\", \\\"billing statements\\\", \\\"opening hours\\\"\\n- reply: one customer reply of at most 70 words. Polite, plain language. Start with \\\"Hi,\\\" and end with \\\"Customer Care Team\\\". Answer using only the FAQ above. If the FAQ does not cover the question, say a team member will confirm the answer by email. Do not invent facts, names, prices or timeframes.\";\nconst SERVICE_PROMPT = \"You triage service requests for a service company's operations team.\\nCustomer request: {text}\\n\\nReturn JSON with exactly these fields:\\n- summary: one sentence stating what the customer wants done, including every specific detail they gave (for example a new address or a date). Add no details they did not give.\\n- department: exactly one of: Billing, Account Services, Technical Support, Plan Changes, Service Desk. Billing is for payments, invoices and refunds. Account Services is for changing personal or account details. Technical Support is for faults and setup help. Plan Changes is for upgrading, downgrading or cancelling a plan. Service Desk is for anything else.\\n- reply: one customer reply of at most 70 words. Polite, plain language. Start with \\\"Hi,\\\" and end with \\\"Customer Care Team\\\". Confirm you received the request, restate what they asked for using only their own words, say it has been passed to the department you chose, and say it will be actioned within 1 business day. Do not invent facts, names, prices or timeframes.\";\nconst DEPARTMENTS = [\"Billing\", \"Account Services\", \"Technical Support\", \"Plan Changes\", \"Service Desk\"];\nconst INSTR = {\"Complaint\": \"Apologise, show you understand the specific problem, confirm you received the complaint, and say it has been passed to a senior member of the team who will follow up. Do not give a timeframe.\", \"General Enquiry\": \"Answer using only the FAQ below. If the FAQ does not cover the question, say a team member will confirm the answer by email.\", \"Service Request\": \"Confirm you received the request, restate what they asked for using only their own words (add no details they did not give), and say it will be actioned within 1 business day.\", \"Reminder\": \"Apologise for the wait, say the case is still open and a senior member of the team is following it up, and say they will hear from the team again soon. Do not give a timeframe.\", \"Urgent Escalation\": \"Acknowledge the urgency, say the case has been escalated to a priority team, and say someone will contact them within 2 hours.\"};\nconst FAQ = \"SAMPLE FAQ (made up for this demo; not real company information)\\n- Opening hours: Monday to Friday 8am to 6pm, Saturday 9am to 1pm. Closed on public holidays, but online help is available 24/7.\\n- Student discount: Students get 10% off any plan with a valid student ID.\\n- Statements: Log in, open Documents, choose Statements and select the last 12 months to download.\\n- Opening an account: You need photo ID and proof of address, such as a utility bill or bank statement.\\n- Card payments: Paying by credit card has a 1.5% fee. Bank transfer and direct debit are free.\\n- Plans: Basic includes standard support. Premium adds priority support and a higher monthly allowance.\\n- International callers: Call +61 3 5550 0100 (sample number).\\n- Late payment: Bills are due 14 days after the statement date. A late fee of $10 applies after that.\\n- Changing plans: You can change plan at any time from your account. The new plan starts on your next billing date.\\n- Cancelling: Cancel any time from your account or by phone. There are no exit fees on month-to-month plans.\\n- Direct debit: Set up direct debit in your account under Payments. It takes effect from the next bill.\\n- Updating details: Change your address, phone number or email in your account under Profile.\\n- Lost or stolen card: Call the 24/7 line straight away so the card can be blocked. A replacement arrives in 5 business days.\\n- Refunds: Refunds for billing errors are returned to the original payment method within 7 business days.\\n- Making a complaint: You can complain by phone, email or online. We acknowledge every complaint on the day we receive it.\\n- Online account: Register with your account number and email. A reset link is sent if you forget your password.\\n- Service outages: Check the status page for known outages. We post updates every hour until service is restored.\\n\";\nconst prep = $('Prepare request').first().json;\nlet result;\ntry {\n  const text = $input.first().json.candidates[0].content.parts[0].text;\n  result = JSON.parse(text);\n} catch (e) {\n  result = { type: null, urgency: null, confidence: 0, reason: 'Classifier error: ' + String(e.message).slice(0, 80) };\n}\nconst TYPES = ['Complaint', 'General Enquiry', 'Service Request'];\nconst URGENCIES = ['low', 'medium', 'high'];\nconst valid = result && TYPES.includes(result.type) && URGENCIES.includes(result.urgency) && typeof result.confidence === 'number';\nlet branch;\nif (!valid || result.confidence < 0.7) branch = 'Needs Human Review';\nelse if (result.urgency === 'high') branch = 'Urgent Escalation';\nelse branch = result.type;\nif (!result || typeof result !== 'object') result = { type: null, urgency: null, confidence: 0, reason: 'Classifier error' };\n\nfunction geminiBody(text, json) {\n  return { contents: [{ parts: [{ text }] }], generationConfig: Object.assign({ temperature: 0.3 }, json ? { responseMimeType: 'application/json' } : {}) };\n}\nfunction replyPrompt(instruction) {\n  return REPLY_PROMPT.replace('{instruction}', () => instruction).replace('{text}', () => prep.request).replace('{extra}', () => '');\n}\nlet replyBody = null;\nif (branch === 'General Enquiry') {\n  replyBody = geminiBody(ENQUIRY_PROMPT.replace('{text}', () => prep.request).replace('{faq}', () => FAQ), true);\n} else if (branch === 'Service Request') {\n  replyBody = geminiBody(SERVICE_PROMPT.replace('{text}', () => prep.request), true);\n} else if (INSTR[branch]) {\n  replyBody = geminiBody(replyPrompt(INSTR[branch]), false);\n}\nconst updateBody = geminiBody(replyPrompt(INSTR['Reminder']), false);\nreturn [{ json: { request: prep.request, customer_email: prep.customer_email, case_id: prep.case_id, reminder_override: prep.reminder_override, result, branch, replyBody, updateBody } }];\n"
+      },
+      "id": "node-4",
+      "name": "Validate and route",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        750,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "rule-complaint",
+                    "leftValue": "={{ $json.branch }}",
+                    "rightValue": "Complaint",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Complaint"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "rule-general-enquiry",
+                    "leftValue": "={{ $json.branch }}",
+                    "rightValue": "General Enquiry",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "General Enquiry"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "rule-service-request",
+                    "leftValue": "={{ $json.branch }}",
+                    "rightValue": "Service Request",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Service Request"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "rule-urgent-escalation",
+                    "leftValue": "={{ $json.branch }}",
+                    "rightValue": "Urgent Escalation",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Urgent Escalation"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "rule-needs-human-review",
+                    "leftValue": "={{ $json.branch }}",
+                    "rightValue": "Needs Human Review",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Needs Human Review"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-5",
+      "name": "Which branch",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        1000,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map(i => ({ json: Object.assign({}, i.json, { resume_url: $execution.resumeUrl }) }));"
+      },
+      "id": "node-6",
+      "name": "Collect result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1900,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($('Validate and route').first().json.replyBody) }}",
+        "options": {
+          "timeout": 60000
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "id": "node-7",
+      "name": "Complaint: draft reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1300,
+        20
+      ],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "Gemini API key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst TEAMS = {\n  'Complaint': ['Senior Handler', 'senior-handler@sample-company.example'],\n  'Urgent Escalation': ['On-call Supervisor', 'supervisor@sample-company.example'],\n  'Needs Human Review': ['Human Review Queue', 'human-review@sample-company.example']\n};\nconst PRIORITY = { 'Complaint': 'High', 'General Enquiry': 'Low', 'Service Request': 'Medium', 'Urgent Escalation': 'Critical', 'Needs Human Review': 'Pending review' };\nconst FOLLOW = {\n  'Complaint': ['2-hour reminder: senior handler checks the complaint is being resolved', 2],\n  'General Enquiry': ['No follow-up needed: resolved with an automatic reply', null],\n  'Service Request': ['SLA timer: the department actions the request within 1 business day', 24],\n  'Urgent Escalation': ['2-hour follow-up by the priority team; automatic resolution paused', 2],\n  'Needs Human Review': ['A human agent reviews the case within 4 hours', 4]\n};\nfunction finish(base, branch, reply, subtopic, steps0, status, teamOverride, extra) {\n  const needsApproval = branch === 'Urgent Escalation' && !!reply;\n  const team = teamOverride || TEAMS[branch] || null;\n  extra = extra || {};\n  const fu = FOLLOW[branch];\n  const priority = PRIORITY[branch];\n  const steps = steps0.slice();\n  if (subtopic) steps.unshift('Classified the sub-topic: ' + subtopic);\n  if (reply && needsApproval) steps.push('Held the reply for human approval (not sent yet)');\n  else if (reply) steps.push('Sent the reply to ' + base.customer_email + ' (email via n8n)');\n  if (team) steps.push('Sent a routing notification to ' + team[0] + ' (Slack)');\n  const r = base.result;\n  const conf = (typeof r.confidence === 'number') ? r.confidence.toFixed(2) : 'n/a';\n  let ack = '';\n  if (reply) ack = needsApproval ? 'drafted, held for human approval (not yet sent)' : 'sent to ' + base.customer_email + ' (email via n8n)';\n  const dueText = fu[1] === null ? '' : ' (due in ' + fu[1] + ' hours)';\n  const lines = [\n    'Case #' + base.case_id + ' | ' + branch + ' | PRIORITY: ' + priority,\n    'Request: ' + base.request,\n    'Type: ' + r.type + ' | Urgency: ' + r.urgency + ' | Confidence: ' + conf,\n    'Model reason: ' + r.reason\n  ];\n  if (ack) lines.push('Customer acknowledgement: ' + ack);\n  if (extra.department) { lines.push('Department: ' + extra.department); lines.push('Request details: ' + (extra.summary || '-')); }\n  lines.push('Action needed: ' + fu[0] + dueText);\n  const body = lines.join('\\n');\n  const messages = [];\n  if (reply) messages.push({ kind: 'Customer reply', to: base.customer_email, subject: 'Re: your request (case #' + base.case_id + ')', body: reply, status: needsApproval ? 'Held - awaiting approval' : 'Sent (email)' });\n  if (team) messages.push({ kind: 'Internal notification', to: team[1], subject: '[' + branch + '] Case #' + base.case_id, body, status: 'Sent (Slack)' });\n  const ov = base.reminder_override;\n  const minutes = fu[1] === null ? null : ((ov !== null && ov !== undefined) ? ov : fu[1] * 60);\n  return [{ json: {\n    case_id: base.case_id, request: base.request, customer_email: base.customer_email,\n    result: r, branch, status, priority, department: extra.department || null, summary: extra.summary || null, needs_approval: needsApproval, subtopic, steps, reply,\n    follow_up: fu[0], follow_up_hours: fu[1], reminder_minutes: minutes, messages,\n    team: team ? team[0] : null,\n    slack_text: team ? ('*[' + branch + '] Case #' + base.case_id + '* to ' + team[0] + '\\n' + body) : null\n  } }];\n}\nconst base = $('Validate and route').first().json;\n\nlet reply = null;\ntry { reply = $input.first().json.candidates[0].content.parts[0].text.trim() || null; } catch (e) {}\nconst replyStep = (what) => reply ? ('Generated ' + what) : 'Could not generate a reply (API error); queued for a manual reply';\n\nreturn finish(base, 'Complaint', reply, null, [\n  replyStep('a tailored apology and acknowledgement reply'),\n  'Escalated to a senior handler',\n  'Logged the case with a High priority flag'\n], 'Escalated - Senior Handler');\n"
+      },
+      "id": "node-8",
+      "name": "Complaint: actions",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1560,
+        20
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($('Validate and route').first().json.replyBody) }}",
+        "options": {
+          "timeout": 60000
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "id": "node-9",
+      "name": "General Enquiry: draft reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1300,
+        210
+      ],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "Gemini API key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst TEAMS = {\n  'Complaint': ['Senior Handler', 'senior-handler@sample-company.example'],\n  'Urgent Escalation': ['On-call Supervisor', 'supervisor@sample-company.example'],\n  'Needs Human Review': ['Human Review Queue', 'human-review@sample-company.example']\n};\nconst PRIORITY = { 'Complaint': 'High', 'General Enquiry': 'Low', 'Service Request': 'Medium', 'Urgent Escalation': 'Critical', 'Needs Human Review': 'Pending review' };\nconst FOLLOW = {\n  'Complaint': ['2-hour reminder: senior handler checks the complaint is being resolved', 2],\n  'General Enquiry': ['No follow-up needed: resolved with an automatic reply', null],\n  'Service Request': ['SLA timer: the department actions the request within 1 business day', 24],\n  'Urgent Escalation': ['2-hour follow-up by the priority team; automatic resolution paused', 2],\n  'Needs Human Review': ['A human agent reviews the case within 4 hours', 4]\n};\nfunction finish(base, branch, reply, subtopic, steps0, status, teamOverride, extra) {\n  const needsApproval = branch === 'Urgent Escalation' && !!reply;\n  const team = teamOverride || TEAMS[branch] || null;\n  extra = extra || {};\n  const fu = FOLLOW[branch];\n  const priority = PRIORITY[branch];\n  const steps = steps0.slice();\n  if (subtopic) steps.unshift('Classified the sub-topic: ' + subtopic);\n  if (reply && needsApproval) steps.push('Held the reply for human approval (not sent yet)');\n  else if (reply) steps.push('Sent the reply to ' + base.customer_email + ' (email via n8n)');\n  if (team) steps.push('Sent a routing notification to ' + team[0] + ' (Slack)');\n  const r = base.result;\n  const conf = (typeof r.confidence === 'number') ? r.confidence.toFixed(2) : 'n/a';\n  let ack = '';\n  if (reply) ack = needsApproval ? 'drafted, held for human approval (not yet sent)' : 'sent to ' + base.customer_email + ' (email via n8n)';\n  const dueText = fu[1] === null ? '' : ' (due in ' + fu[1] + ' hours)';\n  const lines = [\n    'Case #' + base.case_id + ' | ' + branch + ' | PRIORITY: ' + priority,\n    'Request: ' + base.request,\n    'Type: ' + r.type + ' | Urgency: ' + r.urgency + ' | Confidence: ' + conf,\n    'Model reason: ' + r.reason\n  ];\n  if (ack) lines.push('Customer acknowledgement: ' + ack);\n  if (extra.department) { lines.push('Department: ' + extra.department); lines.push('Request details: ' + (extra.summary || '-')); }\n  lines.push('Action needed: ' + fu[0] + dueText);\n  const body = lines.join('\\n');\n  const messages = [];\n  if (reply) messages.push({ kind: 'Customer reply', to: base.customer_email, subject: 'Re: your request (case #' + base.case_id + ')', body: reply, status: needsApproval ? 'Held - awaiting approval' : 'Sent (email)' });\n  if (team) messages.push({ kind: 'Internal notification', to: team[1], subject: '[' + branch + '] Case #' + base.case_id, body, status: 'Sent (Slack)' });\n  const ov = base.reminder_override;\n  const minutes = fu[1] === null ? null : ((ov !== null && ov !== undefined) ? ov : fu[1] * 60);\n  return [{ json: {\n    case_id: base.case_id, request: base.request, customer_email: base.customer_email,\n    result: r, branch, status, priority, department: extra.department || null, summary: extra.summary || null, needs_approval: needsApproval, subtopic, steps, reply,\n    follow_up: fu[0], follow_up_hours: fu[1], reminder_minutes: minutes, messages,\n    team: team ? team[0] : null,\n    slack_text: team ? ('*[' + branch + '] Case #' + base.case_id + '* to ' + team[0] + '\\n' + body) : null\n  } }];\n}\nconst base = $('Validate and route').first().json;\n\nlet reply = null, subtopic = null;\ntry {\n  const d = JSON.parse($input.first().json.candidates[0].content.parts[0].text);\n  subtopic = (d.subtopic || '').trim() || null;\n  reply = (d.reply || '').trim() || null;\n} catch (e) {}\nconst replyStep = (what) => reply ? ('Generated ' + what) : 'Could not generate a reply (API error); queued for a manual reply';\nreturn finish(base, 'General Enquiry', reply, subtopic, [\n  replyStep('an answer from the FAQ knowledge base'),\n  'Logged as resolved'\n], 'Resolved');\n"
+      },
+      "id": "node-10",
+      "name": "General Enquiry: actions",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1560,
+        210
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($('Validate and route').first().json.replyBody) }}",
+        "options": {
+          "timeout": 60000
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "id": "node-11",
+      "name": "Service Request: draft reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1300,
+        400
+      ],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "Gemini API key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst TEAMS = {\n  'Complaint': ['Senior Handler', 'senior-handler@sample-company.example'],\n  'Urgent Escalation': ['On-call Supervisor', 'supervisor@sample-company.example'],\n  'Needs Human Review': ['Human Review Queue', 'human-review@sample-company.example']\n};\nconst PRIORITY = { 'Complaint': 'High', 'General Enquiry': 'Low', 'Service Request': 'Medium', 'Urgent Escalation': 'Critical', 'Needs Human Review': 'Pending review' };\nconst FOLLOW = {\n  'Complaint': ['2-hour reminder: senior handler checks the complaint is being resolved', 2],\n  'General Enquiry': ['No follow-up needed: resolved with an automatic reply', null],\n  'Service Request': ['SLA timer: the department actions the request within 1 business day', 24],\n  'Urgent Escalation': ['2-hour follow-up by the priority team; automatic resolution paused', 2],\n  'Needs Human Review': ['A human agent reviews the case within 4 hours', 4]\n};\nfunction finish(base, branch, reply, subtopic, steps0, status, teamOverride, extra) {\n  const needsApproval = branch === 'Urgent Escalation' && !!reply;\n  const team = teamOverride || TEAMS[branch] || null;\n  extra = extra || {};\n  const fu = FOLLOW[branch];\n  const priority = PRIORITY[branch];\n  const steps = steps0.slice();\n  if (subtopic) steps.unshift('Classified the sub-topic: ' + subtopic);\n  if (reply && needsApproval) steps.push('Held the reply for human approval (not sent yet)');\n  else if (reply) steps.push('Sent the reply to ' + base.customer_email + ' (email via n8n)');\n  if (team) steps.push('Sent a routing notification to ' + team[0] + ' (Slack)');\n  const r = base.result;\n  const conf = (typeof r.confidence === 'number') ? r.confidence.toFixed(2) : 'n/a';\n  let ack = '';\n  if (reply) ack = needsApproval ? 'drafted, held for human approval (not yet sent)' : 'sent to ' + base.customer_email + ' (email via n8n)';\n  const dueText = fu[1] === null ? '' : ' (due in ' + fu[1] + ' hours)';\n  const lines = [\n    'Case #' + base.case_id + ' | ' + branch + ' | PRIORITY: ' + priority,\n    'Request: ' + base.request,\n    'Type: ' + r.type + ' | Urgency: ' + r.urgency + ' | Confidence: ' + conf,\n    'Model reason: ' + r.reason\n  ];\n  if (ack) lines.push('Customer acknowledgement: ' + ack);\n  if (extra.department) { lines.push('Department: ' + extra.department); lines.push('Request details: ' + (extra.summary || '-')); }\n  lines.push('Action needed: ' + fu[0] + dueText);\n  const body = lines.join('\\n');\n  const messages = [];\n  if (reply) messages.push({ kind: 'Customer reply', to: base.customer_email, subject: 'Re: your request (case #' + base.case_id + ')', body: reply, status: needsApproval ? 'Held - awaiting approval' : 'Sent (email)' });\n  if (team) messages.push({ kind: 'Internal notification', to: team[1], subject: '[' + branch + '] Case #' + base.case_id, body, status: 'Sent (Slack)' });\n  const ov = base.reminder_override;\n  const minutes = fu[1] === null ? null : ((ov !== null && ov !== undefined) ? ov : fu[1] * 60);\n  return [{ json: {\n    case_id: base.case_id, request: base.request, customer_email: base.customer_email,\n    result: r, branch, status, priority, department: extra.department || null, summary: extra.summary || null, needs_approval: needsApproval, subtopic, steps, reply,\n    follow_up: fu[0], follow_up_hours: fu[1], reminder_minutes: minutes, messages,\n    team: team ? team[0] : null,\n    slack_text: team ? ('*[' + branch + '] Case #' + base.case_id + '* to ' + team[0] + '\\n' + body) : null\n  } }];\n}\nconst base = $('Validate and route').first().json;\nconst DEPARTMENTS = [\"Billing\", \"Account Services\", \"Technical Support\", \"Plan Changes\", \"Service Desk\"];\n\nlet reply = null, summary = null, department = 'Service Desk';\ntry {\n  const d = JSON.parse($input.first().json.candidates[0].content.parts[0].text);\n  summary = (d.summary || '').trim() || null;\n  reply = (d.reply || '').trim() || null;\n  const dep = (d.department || '').trim();\n  if (DEPARTMENTS.includes(dep)) department = dep;\n} catch (e) {}\nconst steps = [];\nif (summary) steps.push('Extracted the request details: ' + summary);\nsteps.push(reply ? 'Generated a confirmation reply that restates the request' : 'Could not generate a reply (API error); queued for a manual reply');\nsteps.push('Created a ticket and routed it to the ' + department + ' team');\nconst team = [department, department.toLowerCase().replace(/ /g, '-') + '@sample-company.example'];\nreturn finish(base, 'Service Request', reply, null, steps, 'Open - ' + department, team, { department, summary });\n"
+      },
+      "id": "node-12",
+      "name": "Service Request: actions",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1560,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($('Validate and route').first().json.replyBody) }}",
+        "options": {
+          "timeout": 60000
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "id": "node-13",
+      "name": "Urgent Escalation: draft reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1300,
+        590
+      ],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "Gemini API key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst TEAMS = {\n  'Complaint': ['Senior Handler', 'senior-handler@sample-company.example'],\n  'Urgent Escalation': ['On-call Supervisor', 'supervisor@sample-company.example'],\n  'Needs Human Review': ['Human Review Queue', 'human-review@sample-company.example']\n};\nconst PRIORITY = { 'Complaint': 'High', 'General Enquiry': 'Low', 'Service Request': 'Medium', 'Urgent Escalation': 'Critical', 'Needs Human Review': 'Pending review' };\nconst FOLLOW = {\n  'Complaint': ['2-hour reminder: senior handler checks the complaint is being resolved', 2],\n  'General Enquiry': ['No follow-up needed: resolved with an automatic reply', null],\n  'Service Request': ['SLA timer: the department actions the request within 1 business day', 24],\n  'Urgent Escalation': ['2-hour follow-up by the priority team; automatic resolution paused', 2],\n  'Needs Human Review': ['A human agent reviews the case within 4 hours', 4]\n};\nfunction finish(base, branch, reply, subtopic, steps0, status, teamOverride, extra) {\n  const needsApproval = branch === 'Urgent Escalation' && !!reply;\n  const team = teamOverride || TEAMS[branch] || null;\n  extra = extra || {};\n  const fu = FOLLOW[branch];\n  const priority = PRIORITY[branch];\n  const steps = steps0.slice();\n  if (subtopic) steps.unshift('Classified the sub-topic: ' + subtopic);\n  if (reply && needsApproval) steps.push('Held the reply for human approval (not sent yet)');\n  else if (reply) steps.push('Sent the reply to ' + base.customer_email + ' (email via n8n)');\n  if (team) steps.push('Sent a routing notification to ' + team[0] + ' (Slack)');\n  const r = base.result;\n  const conf = (typeof r.confidence === 'number') ? r.confidence.toFixed(2) : 'n/a';\n  let ack = '';\n  if (reply) ack = needsApproval ? 'drafted, held for human approval (not yet sent)' : 'sent to ' + base.customer_email + ' (email via n8n)';\n  const dueText = fu[1] === null ? '' : ' (due in ' + fu[1] + ' hours)';\n  const lines = [\n    'Case #' + base.case_id + ' | ' + branch + ' | PRIORITY: ' + priority,\n    'Request: ' + base.request,\n    'Type: ' + r.type + ' | Urgency: ' + r.urgency + ' | Confidence: ' + conf,\n    'Model reason: ' + r.reason\n  ];\n  if (ack) lines.push('Customer acknowledgement: ' + ack);\n  if (extra.department) { lines.push('Department: ' + extra.department); lines.push('Request details: ' + (extra.summary || '-')); }\n  lines.push('Action needed: ' + fu[0] + dueText);\n  const body = lines.join('\\n');\n  const messages = [];\n  if (reply) messages.push({ kind: 'Customer reply', to: base.customer_email, subject: 'Re: your request (case #' + base.case_id + ')', body: reply, status: needsApproval ? 'Held - awaiting approval' : 'Sent (email)' });\n  if (team) messages.push({ kind: 'Internal notification', to: team[1], subject: '[' + branch + '] Case #' + base.case_id, body, status: 'Sent (Slack)' });\n  const ov = base.reminder_override;\n  const minutes = fu[1] === null ? null : ((ov !== null && ov !== undefined) ? ov : fu[1] * 60);\n  return [{ json: {\n    case_id: base.case_id, request: base.request, customer_email: base.customer_email,\n    result: r, branch, status, priority, department: extra.department || null, summary: extra.summary || null, needs_approval: needsApproval, subtopic, steps, reply,\n    follow_up: fu[0], follow_up_hours: fu[1], reminder_minutes: minutes, messages,\n    team: team ? team[0] : null,\n    slack_text: team ? ('*[' + branch + '] Case #' + base.case_id + '* to ' + team[0] + '\\n' + body) : null\n  } }];\n}\nconst base = $('Validate and route').first().json;\n\nlet reply = null;\ntry { reply = $input.first().json.candidates[0].content.parts[0].text.trim() || null; } catch (e) {}\nconst replyStep = (what) => reply ? ('Generated ' + what) : 'Could not generate a reply (API error); queued for a manual reply';\n\nreturn finish(base, 'Urgent Escalation', reply, null, [\n  replyStep('an urgent acknowledgement reply'),\n  'Flagged as Priority 1, alerted the on-call supervisor and paused automatic resolution'\n], 'Escalated - Priority 1');\n"
+      },
+      "id": "node-14",
+      "name": "Urgent Escalation: actions",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1560,
+        590
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst TEAMS = {\n  'Complaint': ['Senior Handler', 'senior-handler@sample-company.example'],\n  'Urgent Escalation': ['On-call Supervisor', 'supervisor@sample-company.example'],\n  'Needs Human Review': ['Human Review Queue', 'human-review@sample-company.example']\n};\nconst PRIORITY = { 'Complaint': 'High', 'General Enquiry': 'Low', 'Service Request': 'Medium', 'Urgent Escalation': 'Critical', 'Needs Human Review': 'Pending review' };\nconst FOLLOW = {\n  'Complaint': ['2-hour reminder: senior handler checks the complaint is being resolved', 2],\n  'General Enquiry': ['No follow-up needed: resolved with an automatic reply', null],\n  'Service Request': ['SLA timer: the department actions the request within 1 business day', 24],\n  'Urgent Escalation': ['2-hour follow-up by the priority team; automatic resolution paused', 2],\n  'Needs Human Review': ['A human agent reviews the case within 4 hours', 4]\n};\nfunction finish(base, branch, reply, subtopic, steps0, status, teamOverride, extra) {\n  const needsApproval = branch === 'Urgent Escalation' && !!reply;\n  const team = teamOverride || TEAMS[branch] || null;\n  extra = extra || {};\n  const fu = FOLLOW[branch];\n  const priority = PRIORITY[branch];\n  const steps = steps0.slice();\n  if (subtopic) steps.unshift('Classified the sub-topic: ' + subtopic);\n  if (reply && needsApproval) steps.push('Held the reply for human approval (not sent yet)');\n  else if (reply) steps.push('Sent the reply to ' + base.customer_email + ' (email via n8n)');\n  if (team) steps.push('Sent a routing notification to ' + team[0] + ' (Slack)');\n  const r = base.result;\n  const conf = (typeof r.confidence === 'number') ? r.confidence.toFixed(2) : 'n/a';\n  let ack = '';\n  if (reply) ack = needsApproval ? 'drafted, held for human approval (not yet sent)' : 'sent to ' + base.customer_email + ' (email via n8n)';\n  const dueText = fu[1] === null ? '' : ' (due in ' + fu[1] + ' hours)';\n  const lines = [\n    'Case #' + base.case_id + ' | ' + branch + ' | PRIORITY: ' + priority,\n    'Request: ' + base.request,\n    'Type: ' + r.type + ' | Urgency: ' + r.urgency + ' | Confidence: ' + conf,\n    'Model reason: ' + r.reason\n  ];\n  if (ack) lines.push('Customer acknowledgement: ' + ack);\n  if (extra.department) { lines.push('Department: ' + extra.department); lines.push('Request details: ' + (extra.summary || '-')); }\n  lines.push('Action needed: ' + fu[0] + dueText);\n  const body = lines.join('\\n');\n  const messages = [];\n  if (reply) messages.push({ kind: 'Customer reply', to: base.customer_email, subject: 'Re: your request (case #' + base.case_id + ')', body: reply, status: needsApproval ? 'Held - awaiting approval' : 'Sent (email)' });\n  if (team) messages.push({ kind: 'Internal notification', to: team[1], subject: '[' + branch + '] Case #' + base.case_id, body, status: 'Sent (Slack)' });\n  const ov = base.reminder_override;\n  const minutes = fu[1] === null ? null : ((ov !== null && ov !== undefined) ? ov : fu[1] * 60);\n  return [{ json: {\n    case_id: base.case_id, request: base.request, customer_email: base.customer_email,\n    result: r, branch, status, priority, department: extra.department || null, summary: extra.summary || null, needs_approval: needsApproval, subtopic, steps, reply,\n    follow_up: fu[0], follow_up_hours: fu[1], reminder_minutes: minutes, messages,\n    team: team ? team[0] : null,\n    slack_text: team ? ('*[' + branch + '] Case #' + base.case_id + '* to ' + team[0] + '\\n' + body) : null\n  } }];\n}\nconst base = $('Validate and route').first().json;\n\nreturn finish(base, 'Needs Human Review', null, null, [\n  'Held all automatic actions because the classification was uncertain or invalid',\n  \"Queued for a human agent with the model's reason attached\"\n], 'Waiting - Human Review');\n"
+      },
+      "id": "node-15",
+      "name": "Needs Human Review: actions",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1560,
+        780
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "firstIncomingItem",
+        "options": {}
+      },
+      "id": "node-16",
+      "name": "Respond to app",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        2150,
+        150
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "notify-a-team",
+              "leftValue": "={{ !!$json.slack_text }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "node-17",
+      "name": "Notify a team",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2150,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "accessToken",
+        "resource": "message",
+        "operation": "post",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "request-workflow",
+          "mode": "name"
+        },
+        "text": "={{ $json.slack_text }}",
+        "otherOptions": {}
+      },
+      "id": "node-18",
+      "name": "Slack: notify team",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        2400,
+        330
+      ],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "slackApi": {
+          "id": "",
+          "name": "Slack account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "has-a-follow-up",
+              "leftValue": "={{ $json.reminder_minutes !== null && $json.reminder_minutes !== undefined }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "node-19",
+      "name": "Has a follow-up",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2150,
+        740
+      ]
+    },
+    {
+      "parameters": {
+        "resume": "webhook",
+        "httpMethod": "POST",
+        "options": {},
+        "limitWaitTime": true,
+        "limitType": "afterTimeInterval",
+        "resumeAmount": "={{ $json.reminder_minutes }}",
+        "resumeUnit": "minutes"
+      },
+      "id": "node-20",
+      "name": "Wait for follow-up",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2400,
+        710
+      ],
+      "webhookId": "request-workflow-wait"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst pack = $('Collect result').first().json;\nconst resumed = $input.first().json;\nconst resolvedByApp = !!(resumed && resumed.body && resumed.body.resolved === true);\nreturn resolvedByApp ? [] : [{ json: pack }];\n"
+      },
+      "id": "node-21",
+      "name": "Still open check",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2650,
+        710
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "draft-a-customer-update",
+              "leftValue": "={{ ['Complaint','Urgent Escalation'].includes($json.branch) }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "node-22",
+      "name": "Draft a customer update",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2900,
+        710
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($('Validate and route').first().json.updateBody) }}",
+        "options": {
+          "timeout": 60000
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "id": "node-23",
+      "name": "Gemini: draft update",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3150,
+        620
+      ],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "Gemini API key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst pack = $('Still open check').first().json;\nlet update = null;\ntry { update = $input.first().json.candidates[0].content.parts[0].text.trim() || null; } catch (e) {}\nconst text = '*[REMINDER] Case #' + pack.case_id + ' is overdue* (' + pack.branch + ', priority ' + pack.priority + ')\\n' +\n  'Request: ' + pack.request + '\\n' +\n  'Follow-up that was due: ' + pack.follow_up + '\\n' +\n  'Action needed: check the case now. It is not yet resolved.' +\n  (update ? '\\n\\nDraft customer update (needs approval before sending):\\n' + update : '');\nreturn [{ json: { case_id: pack.case_id, slack_text: text, customer_update_draft: update } }];\n"
+      },
+      "id": "node-24",
+      "name": "Build reminder",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3400,
+        710
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "accessToken",
+        "resource": "message",
+        "operation": "post",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "request-workflow",
+          "mode": "name"
+        },
+        "text": "={{ $json.slack_text }}",
+        "otherOptions": {}
+      },
+      "id": "node-25",
+      "name": "Slack: reminder",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        3650,
+        710
+      ],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "slackApi": {
+          "id": "",
+          "name": "Slack account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst p = $input.first().json;\nconst m = (p.messages || []).find(x => x.kind === 'Customer reply' && String(x.status).startsWith('Sent'));\nif (!m) return [];\nreturn [{ json: { to: m.to, subject: m.subject, body: m.body, case_id: p.case_id } }];\n"
+      },
+      "id": "node-26",
+      "name": "Prepare customer email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2150,
+        540
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "Customer Care <care@sample-company.example>",
+        "toEmail": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}",
+        "emailFormat": "text",
+        "text": "={{ $json.body }}",
+        "options": {}
+      },
+      "id": "node-27",
+      "name": "Email: customer reply",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        2400,
+        540
+      ],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "smtp": {
+          "id": "",
+          "name": "Mailtrap SMTP"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "send-email",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "node-28",
+      "name": "Receive approved reply",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        1100
+      ],
+      "webhookId": "request-workflow-send-email"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst b = $input.first().json.body || $input.first().json;\nif (!b.to || !b.body) { throw new Error('Missing to or body'); }\nreturn [{ json: { to: b.to, subject: b.subject || 'Update on your request', body: b.body, case_id: b.case_id } }];\n"
+      },
+      "id": "node-29",
+      "name": "Prepare approved email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        250,
+        1100
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "Customer Care <care@sample-company.example>",
+        "toEmail": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}",
+        "emailFormat": "text",
+        "text": "={{ $json.body }}",
+        "options": {}
+      },
+      "id": "node-30",
+      "name": "Email: approved reply",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        500,
+        1100
+      ],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "smtp": {
+          "id": "",
+          "name": "Mailtrap SMTP"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## 1. Intake and AI classification\nThe app posts the request here. Gemini labels type, urgency and confidence; code validates it and picks the branch.",
+        "height": 300,
+        "width": 1000,
+        "color": 5
+      },
+      "id": "node-31",
+      "name": "Note ## 1. Intake and AI ",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -20,
+        250
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 2. One path per branch\nEach branch drafts its own reply and applies its own steps, priority and follow-up. Low confidence goes to human review.",
+        "height": 1030,
+        "width": 560,
+        "color": 6
+      },
+      "id": "node-32",
+      "name": "Note ## 2. One path per b",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1260,
+        -60
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 3. Respond, notify and email\nReturns the full result to the app, posts the team notification to Slack and emails the customer reply (Mailtrap). Held replies are not emailed here.",
+        "height": 600,
+        "width": 520,
+        "color": 4
+      },
+      "id": "node-33",
+      "name": "Note ## 3. Respond, notif",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2110,
+        60
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 5. Approved replies\nWhen a person approves a held reply in the app, the app calls this endpoint and the email is sent.",
+        "height": 260,
+        "width": 700,
+        "color": 7
+      },
+      "id": "node-34",
+      "name": "Note ## 5. Approved repli",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -20,
+        980
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 4. 2-hour follow-up\nWaits up to the follow-up time. If the app resumes it early (case resolved) it stops; otherwise it drafts a customer update (complaints and urgent) and reminds the team in Slack.",
+        "height": 330,
+        "width": 1700,
+        "color": 3
+      },
+      "id": "node-35",
+      "name": "Note ## 4. 2-hour follow-",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2110,
+        690
+      ]
+    }
+  ],
+  "connections": {
+    "Receive request": {
+      "main": [
+        [
+          {
+            "node": "Prepare request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare request": {
+      "main": [
+        [
+          {
+            "node": "Gemini: classify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini: classify": {
+      "main": [
+        [
+          {
+            "node": "Validate and route",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate and route": {
+      "main": [
+        [
+          {
+            "node": "Which branch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Which branch": {
+      "main": [
+        [
+          {
+            "node": "Complaint: draft reply",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "General Enquiry: draft reply",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Service Request: draft reply",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Urgent Escalation: draft reply",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Needs Human Review: actions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Complaint: draft reply": {
+      "main": [
+        [
+          {
+            "node": "Complaint: actions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Complaint: actions": {
+      "main": [
+        [
+          {
+            "node": "Collect result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "General Enquiry: draft reply": {
+      "main": [
+        [
+          {
+            "node": "General Enquiry: actions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "General Enquiry: actions": {
+      "main": [
+        [
+          {
+            "node": "Collect result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Service Request: draft reply": {
+      "main": [
+        [
+          {
+            "node": "Service Request: actions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Service Request: actions": {
+      "main": [
+        [
+          {
+            "node": "Collect result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Urgent Escalation: draft reply": {
+      "main": [
+        [
+          {
+            "node": "Urgent Escalation: actions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Urgent Escalation: actions": {
+      "main": [
+        [
+          {
+            "node": "Collect result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Needs Human Review: actions": {
+      "main": [
+        [
+          {
+            "node": "Collect result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect result": {
+      "main": [
+        [
+          {
+            "node": "Respond to app",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Notify a team",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Prepare customer email",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Has a follow-up",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare customer email": {
+      "main": [
+        [
+          {
+            "node": "Email: customer reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify a team": {
+      "main": [
+        [
+          {
+            "node": "Slack: notify team",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has a follow-up": {
+      "main": [
+        [
+          {
+            "node": "Wait for follow-up",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for follow-up": {
+      "main": [
+        [
+          {
+            "node": "Still open check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Still open check": {
+      "main": [
+        [
+          {
+            "node": "Draft a customer update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Draft a customer update": {
+      "main": [
+        [
+          {
+            "node": "Gemini: draft update",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build reminder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini: draft update": {
+      "main": [
+        [
+          {
+            "node": "Build reminder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build reminder": {
+      "main": [
+        [
+          {
+            "node": "Slack: reminder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Receive approved reply": {
+      "main": [
+        [
+          {
+            "node": "Prepare approved email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare approved email": {
+      "main": [
+        [
+          {
+            "node": "Email: approved reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

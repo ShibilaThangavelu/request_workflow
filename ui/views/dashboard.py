@@ -21,9 +21,16 @@ if counts.empty:
 else:
     st.bar_chart(counts.set_index("branch"))
 
+st.markdown("#### Service requests by department")
+by_dept = read("SELECT department, COUNT(*) AS cases FROM cases WHERE department IS NOT NULL GROUP BY department")
+if by_dept.empty:
+    st.caption("No service requests yet.")
+else:
+    st.bar_chart(by_dept.set_index("department"))
+
 st.markdown("#### Case log")
 log = read(
-    "SELECT id, created_at, request, type, urgency, priority, confidence, branch, status, approval_status "
+    "SELECT id, created_at, request, type, subtopic, department, urgency, priority, confidence, branch, status, approval_status "
     "FROM cases ORDER BY id DESC LIMIT 50"
 )
 st.dataframe(log, hide_index=True)

@@ -43,6 +43,7 @@ if out and out.get("case_log"):
     st.divider()
     BANNER.get(out["branch"], st.info)(f"**{out['branch']}** | {out['status']} | Case #{out['case_id']}")
     st.caption("Request: " + st.session_state.get("request_text", ""))
+    st.caption("Processed by: " + out.get("engine", "local Python"))
 
     st.markdown("#### Step 1: how the AI classified it")
     m1, m2, m3, m4 = st.columns(4)

@@ -1,0 +1,53 @@
+{
+  "case_id": 4,
+  "branch": "Urgent Escalation",
+  "steps": [
+    "Generated an urgent acknowledgement reply",
+    "Flagged as Priority 1, alerted the on-call supervisor and paused automatic resolution",
+    "Held the reply for human approval (not sent yet)",
+    "Sent a routing notification to On-call Supervisor (simulated)",
+    "Set follow-up: 2-hour follow-up by the priority team; automatic resolution paused (due 2026-10-25 15:17)"
+  ],
+  "status": "Escalated - Priority 1",
+  "result": {
+    "type": "Service Request",
+    "urgency": "high",
+    "confidence": 0.95,
+    "reason": "The customer is requesting an immediate card block due to a theft that occurred an hour ago."
+  },
+  "reply": "Hi,\n\nI understand this is very urgent, and I am sorry to hear your card was stolen. \n\nWe have escalated your case to our priority team right away. Someone will contact you within 2 hours to help secure your account. \n\nCustomer Care Team",
+  "follow_up": "2-hour follow-up by the priority team; automatic resolution paused",
+  "follow_up_due": "2026-10-25T15:17",
+  "messages": [
+    {
+      "kind": "Customer reply",
+      "to": "customer@example.com",
+      "subject": "Re: your request (case #4)",
+      "body": "Hi,\n\nI understand this is very urgent, and I am sorry to hear your card was stolen. \n\nWe have escalated your case to our priority team right away. Someone will contact you within 2 hours to help secure your account. \n\nCustomer Care Team",
+      "status": "Held - awaiting approval"
+    },
+    {
+      "kind": "Internal notification",
+      "to": "supervisor@sample-company.example",
+      "subject": "[Urgent Escalation] Case #4",
+      "body": "Case #4 | Urgent Escalation | PRIORITY: Critical\nRequest: My card was stolen an hour ago. Please block it immediately.\nType: Service Request | Urgency: high | Confidence: 0.95\nModel reason: The customer is requesting an immediate card block due to a theft that occurred an hour ago.\nCustomer acknowledgement: drafted, held for human approval (not yet sent)\nAction needed: 2-hour follow-up by the priority team; automatic resolution paused (due 2026-10-25 15:17)",
+      "status": "Sent (simulated)"
+    }
+  ],
+  "priority": "Critical",
+  "needs_approval": true,
+  "engine": "local Python",
+  "case_log": {
+    "case_id": 4,
+    "logged_at": "2026-10-25T13:17:43",
+    "branch": "Urgent Escalation",
+    "type": "Service Request",
+    "urgency": "high",
+    "subtopic": null,
+    "department": null,
+    "priority": "Critical",
+    "status": "Escalated - Priority 1",
+    "follow_up": "2-hour follow-up by the priority team; automatic resolution paused",
+    "follow_up_due": "2026-10-25T15:17"
+  }
+}

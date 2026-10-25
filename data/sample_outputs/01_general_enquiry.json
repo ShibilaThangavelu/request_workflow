@@ -1,0 +1,46 @@
+{
+  "case_id": 1,
+  "branch": "General Enquiry",
+  "steps": [
+    "Classified the sub-topic: student discount",
+    "Generated an answer from the FAQ knowledge base",
+    "Logged as resolved",
+    "Sent the reply to customer@example.com (simulated)",
+    "Follow-up: No follow-up needed: resolved with an automatic reply"
+  ],
+  "status": "Resolved",
+  "result": {
+    "type": "General Enquiry",
+    "urgency": "low",
+    "confidence": 0.95,
+    "reason": "The customer is asking for information about student discounts without requesting any changes to their account."
+  },
+  "reply": "Hi,\n\nYes, students get 10% off any plan with a valid student ID.\n\nCustomer Care Team",
+  "follow_up": "No follow-up needed: resolved with an automatic reply",
+  "follow_up_due": null,
+  "messages": [
+    {
+      "kind": "Customer reply",
+      "to": "customer@example.com",
+      "subject": "Re: your request (case #1)",
+      "body": "Hi,\n\nYes, students get 10% off any plan with a valid student ID.\n\nCustomer Care Team",
+      "status": "Sent (simulated)"
+    }
+  ],
+  "priority": "Low",
+  "needs_approval": false,
+  "engine": "local Python",
+  "case_log": {
+    "case_id": 1,
+    "logged_at": "2026-10-25T13:16:36",
+    "branch": "General Enquiry",
+    "type": "General Enquiry",
+    "urgency": "low",
+    "subtopic": "student discount",
+    "department": null,
+    "priority": "Low",
+    "status": "Resolved",
+    "follow_up": "No follow-up needed: resolved with an automatic reply",
+    "follow_up_due": null
+  }
+}

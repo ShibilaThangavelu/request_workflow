@@ -6,6 +6,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import streamlit as st
 
+from workflow import n8n_client
 from workflow.branches import init_db, check_reminders
 
 st.set_page_config(page_title="Request Workflow", layout="wide")
@@ -28,6 +29,7 @@ page = st.navigation(pages)
 
 with st.sidebar:
     st.divider()
+    st.caption("Engine: " + ("n8n workflow" if n8n_client.enabled() else "local Python (set N8N_WEBHOOK_URL to use n8n)"))
     st.caption(
         "Incoming Request Processing Workflow. Submit a request, then follow it: what the customer "
         "receives, what the team receives, what a person must approve, and what is overdue. "

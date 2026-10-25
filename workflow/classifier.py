@@ -56,9 +56,10 @@ Customer request: {text}
 {extra}"""
 
 REPLY_INSTRUCTIONS = {
-    "Complaint": "Apologise, show you understand the specific problem, and say a Customer Care specialist will contact them within 2 business days.",
+    "Complaint": "Apologise, show you understand the specific problem, confirm you received the complaint, and say it has been passed to a senior member of the team who will follow up. Do not give a timeframe.",
     "General Enquiry": "Answer using only the FAQ below. If the FAQ does not cover the question, say a team member will confirm the answer by email.",
     "Service Request": "Confirm you received the request, restate what they asked for using only their own words (add no details they did not give), and say it will be actioned within 1 business day.",
+    "Reminder": "Apologise for the wait, say the case is still open and a senior member of the team is following it up, and say they will hear from the team again soon. Do not give a timeframe.",
     "Urgent Escalation": "Acknowledge the urgency, say the case has been escalated to a priority team, and say someone will contact them within 2 hours.",
 }
 

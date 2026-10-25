@@ -11,18 +11,33 @@ URGENCIES = {"low", "medium", "high"}
 
 # Follow-up action per branch: (description, hours until due or None)
 FOLLOW_UPS = {
-    "Complaint": ("Customer Care specialist contacts the customer within 2 business days", 48),
+    "Complaint": ("2-hour reminder: senior handler checks the complaint is being resolved", 2),
     "General Enquiry": ("No follow-up needed: resolved with an automatic reply", None),
     "Service Request": ("SLA timer: Service Desk actions the request within 1 business day", 24),
     "Urgent Escalation": ("2-hour follow-up by the priority team; automatic resolution paused", 2),
     "Needs Human Review": ("A human agent reviews the case within 4 hours", 4),
 }
 
-NEW_COLUMNS = {"draft_reply": "TEXT", "follow_up": "TEXT", "follow_up_due": "TEXT"}
+NEW_COLUMNS = {"draft_reply": "TEXT", "follow_up": "TEXT", "follow_up_due": "TEXT", "priority": "TEXT",
+               "approval_status": "TEXT", "reminder_sent": "INTEGER DEFAULT 0", "resolved_at": "TEXT"}
+
+# Branches whose customer reply is held until a person approves it (human in the loop)
+APPROVAL_BRANCHES = {"Complaint", "Urgent Escalation"}
+
+# Priority flag set on the case log entry, following the urgency column in the brief
+PRIORITY = {
+    "Complaint": "High",
+    "General Enquiry": "Low",
+    "Service Request": "Medium",
+    "Urgent Escalation": "Critical",
+    "Needs Human Review": "Pending review",
+}
 
 # Team that receives a routing notification per branch: (display name, sample address)
+SUPERVISOR = ("On-call Supervisor", "supervisor@sample-company.example")
+
 TEAMS = {
-    "Complaint": ("Customer Care Team", "customer-care@sample-company.example"),
+    "Complaint": ("Senior Handler", "senior-handler@sample-company.example"),
     "Service Request": ("Service Desk", "service-desk@sample-company.example"),
     "Urgent Escalation": ("On-call Supervisor", "supervisor@sample-company.example"),
     "Needs Human Review": ("Human Review Queue", "human-review@sample-company.example"),
@@ -49,31 +64,31 @@ def init_db():
                 db.execute("ALTER TABLE cases ADD COLUMN " + column + " " + kind)
 
 
-def log_case(request, result, branch, steps, status, reply, follow_up, due):
+def log_case(request, result, branch, steps, status, reply, follow_up, due, priority, approval_status):
     with sqlite3.connect(DB_PATH) as db:
         cur = db.execute(
             "INSERT INTO cases (created_at, request, type, urgency, confidence, reason, branch, steps, status, "
-            "draft_reply, follow_up, follow_up_due) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            "draft_reply, follow_up, follow_up_due, priority, approval_status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (datetime.now().isoformat(timespec="seconds"), request, result.get("type"), result.get("urgency"),
              result.get("confidence"), result.get("reason"), branch, " | ".join(steps), status,
-             reply, follow_up, due),
+             reply, follow_up, due, priority, approval_status),
         )
         return cur.lastrowid
 
 
-def send_message(case_id, kind, to_addr, subject, body):
+def send_message(case_id, kind, to_addr, subject, body, status="Sent (simulated)"):
     """Simulated send: the message is stored in the outbox table, nothing leaves the computer."""
     with sqlite3.connect(DB_PATH) as db:
         db.execute(
             "INSERT INTO outbox (case_id, created_at, kind, to_addr, subject, body, status) VALUES (?,?,?,?,?,?,?)",
-            (case_id, datetime.now().isoformat(timespec="seconds"), kind, to_addr, subject, body, "Sent (simulated)"),
+            (case_id, datetime.now().isoformat(timespec="seconds"), kind, to_addr, subject, body, status),
         )
 
 
-def build_notification(case_id, branch, request, result, follow_up, due):
+def build_notification(case_id, branch, request, result, follow_up, due, priority):
     conf = result.get("confidence")
     lines = [
-        "Case #" + str(case_id) + " | " + branch,
+        "Case #" + str(case_id) + " | " + branch + " | PRIORITY: " + priority,
         "Request: " + request,
         "Type: " + str(result.get("type")) + " | Urgency: " + str(result.get("urgency"))
         + " | Confidence: " + (f"{conf:.2f}" if isinstance(conf, (int, float)) else "n/a"),
@@ -92,9 +107,10 @@ def reply_step(reply, what):
 def complaint(request, reply):
     steps = [
         reply_step(reply, "a tailored apology and acknowledgement reply"),
-        "Routed to the Customer Care team",
+        "Escalated to a senior handler",
+        "Logged the case with a High priority flag",
     ]
-    return steps, "Open - Customer Care"
+    return steps, "Escalated - Senior Handler"
 
 
 def general_enquiry(request, reply):
@@ -173,11 +189,15 @@ def process_request(request, customer_email="customer@example.com"):
     steps, status = fn(request, reply)
 
     team = TEAMS.get(branch)
-    if reply:
+    needs_approval = branch in APPROVAL_BRANCHES and bool(reply)
+    if reply and needs_approval:
+        steps.append("Held the reply for human approval (not sent yet)")
+    elif reply:
         steps.append("Sent the reply to " + customer_email + " (simulated)")
     if team:
         steps.append("Sent a routing notification to " + team[0] + " (simulated)")
 
+    priority = PRIORITY[branch]
     follow_up, hours = FOLLOW_UPS[branch]
     due = None
     if hours is not None:
@@ -186,24 +206,132 @@ def process_request(request, customer_email="customer@example.com"):
     else:
         steps.append("Follow-up: " + follow_up)
 
-    case_id = log_case(request, result, branch, steps, status, reply, follow_up, due)
+    approval_status = "Pending approval" if needs_approval else "Not required"
+    case_id = log_case(request, result, branch, steps, status, reply, follow_up, due, priority, approval_status)
 
     messages = []
     if reply:
         messages.append({"kind": "Customer reply", "to": customer_email,
-                         "subject": "Re: your request (case #" + str(case_id) + ")", "body": reply})
+                         "subject": "Re: your request (case #" + str(case_id) + ")", "body": reply,
+                         "status": "Held - awaiting approval" if needs_approval else "Sent (simulated)"})
     if team:
         messages.append({"kind": "Internal notification", "to": team[1],
                          "subject": "[" + branch + "] Case #" + str(case_id),
-                         "body": build_notification(case_id, branch, request, result, follow_up, due)})
+                         "body": build_notification(case_id, branch, request, result, follow_up, due, priority),
+                         "status": "Sent (simulated)"})
     for m in messages:
-        send_message(case_id, m["kind"], m["to"], m["subject"], m["body"])
+        send_message(case_id, m["kind"], m["to"], m["subject"], m["body"], m["status"])
 
     return {
         "case_id": case_id, "branch": branch, "steps": steps, "status": status,
         "result": result, "reply": reply, "follow_up": follow_up, "follow_up_due": due,
-        "messages": messages,
+        "messages": messages, "priority": priority, "needs_approval": needs_approval,
+        "case_log": {
+            "case_id": case_id, "logged_at": datetime.now().isoformat(timespec="seconds"),
+            "branch": branch, "type": result.get("type"), "urgency": result.get("urgency"),
+            "priority": priority, "status": status, "follow_up": follow_up, "follow_up_due": due,
+        },
     }
+
+
+# ---------- human approval ----------
+def pending_approvals():
+    """Customer replies that are held until a person approves them."""
+    with sqlite3.connect(DB_PATH) as db:
+        rows = db.execute(
+            "SELECT o.id, o.case_id, c.branch, c.priority, c.request, o.to_addr, o.subject, o.body "
+            "FROM outbox o JOIN cases c ON c.id = o.case_id "
+            "WHERE o.status = 'Held - awaiting approval' ORDER BY o.id"
+        ).fetchall()
+    keys = ["outbox_id", "case_id", "branch", "priority", "request", "to_addr", "subject", "body"]
+    return [dict(zip(keys, r)) for r in rows]
+
+
+def approve_reply(outbox_id, edited_body=None):
+    """Release a held reply (optionally edited) so it is 'sent' (simulated)."""
+    with sqlite3.connect(DB_PATH) as db:
+        row = db.execute("SELECT case_id, kind FROM outbox WHERE id = ?", (outbox_id,)).fetchone()
+        if not row:
+            return
+        body = edited_body.strip() if edited_body and edited_body.strip() else None
+        if body:
+            db.execute("UPDATE outbox SET body = ?, status = 'Sent (simulated) - approved and edited' WHERE id = ?",
+                       (body, outbox_id))
+        else:
+            db.execute("UPDATE outbox SET status = 'Sent (simulated) - approved' WHERE id = ?", (outbox_id,))
+        if row[1] == "Customer reply":
+            db.execute("UPDATE cases SET approval_status = 'Approved', "
+                       "steps = steps || ' | A person approved the reply and it was sent (simulated)' WHERE id = ?",
+                       (row[0],))
+
+
+def reject_reply(outbox_id):
+    """Block a held reply: it is not sent and the case is flagged for manual handling."""
+    with sqlite3.connect(DB_PATH) as db:
+        row = db.execute("SELECT case_id, kind FROM outbox WHERE id = ?", (outbox_id,)).fetchone()
+        if not row:
+            return
+        db.execute("UPDATE outbox SET status = 'Rejected - not sent' WHERE id = ?", (outbox_id,))
+        if row[1] == "Customer reply":
+            db.execute("UPDATE cases SET approval_status = 'Rejected', "
+                       "steps = steps || ' | A person rejected the AI reply: handle manually' WHERE id = ?",
+                       (row[0],))
+
+
+# ---------- follow-up reminders and resolving ----------
+def resolve_case(case_id):
+    """Close a case so no more reminders fire for it."""
+    with sqlite3.connect(DB_PATH) as db:
+        db.execute("UPDATE cases SET resolved_at = ?, status = 'Resolved' WHERE id = ?",
+                   (datetime.now().isoformat(timespec="seconds"), case_id))
+
+
+def check_reminders(extra_hours=0):
+    """Fire reminders for open cases whose follow-up time has passed.
+
+    For each overdue case this sends an escalation notification to the supervisor and, for complaints
+    and urgent cases, queues an AI-drafted update to the customer (held for approval).
+    extra_hours moves the clock forward so a demo can show a 2-hour reminder without waiting.
+    Returns a list of the cases that fired.
+    """
+    init_db()
+    cutoff = (datetime.now() + timedelta(hours=extra_hours)).isoformat(timespec="minutes")
+    with sqlite3.connect(DB_PATH) as db:
+        due = db.execute(
+            "SELECT id, branch, request, priority, follow_up, follow_up_due FROM cases "
+            "WHERE follow_up_due IS NOT NULL AND follow_up_due <= ? "
+            "AND COALESCE(reminder_sent, 0) = 0 AND resolved_at IS NULL ORDER BY id",
+            (cutoff,),
+        ).fetchall()
+        if not due:
+            return []
+        cust = {r[0]: r[1] for r in db.execute(
+            "SELECT case_id, to_addr FROM outbox WHERE kind = 'Customer reply'")}
+    fired = []
+    for case_id, branch, request, priority, follow_up, follow_up_due in due:
+        body = "\n".join([
+            "OVERDUE FOLLOW-UP | Case #" + str(case_id) + " | " + branch + " | PRIORITY: " + priority,
+            "Request: " + request,
+            "Follow-up that was due: " + follow_up + " (due " + follow_up_due.replace("T", " ") + ")",
+            "Action needed: check the case now. It is not yet resolved.",
+        ])
+        send_message(case_id, "Escalation reminder", SUPERVISOR[1],
+                     "[REMINDER] Case #" + str(case_id) + " is overdue (" + branch + ")", body)
+        update = None
+        if branch in APPROVAL_BRANCHES:
+            update = draft_reply(request, "Reminder")
+            if update:
+                send_message(case_id, "Customer update (draft)", cust.get(case_id, "customer@example.com"),
+                             "Update on your request (case #" + str(case_id) + ")", update,
+                             "Held - awaiting approval")
+        with sqlite3.connect(DB_PATH) as db:
+            db.execute(
+                "UPDATE cases SET reminder_sent = 1, steps = steps || ? WHERE id = ?",
+                (" | Reminder fired: escalation notification sent to the supervisor"
+                 + (" and a draft customer update queued for approval" if update else ""), case_id),
+            )
+        fired.append({"case_id": case_id, "branch": branch, "customer_update_drafted": bool(update)})
+    return fired
 
 
 if __name__ == "__main__":

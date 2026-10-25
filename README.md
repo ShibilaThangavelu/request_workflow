@@ -10,7 +10,7 @@ flowchart LR
     B --> C{"Validate and route<br/>workflow/branches.py"}
     C -->|"invalid, API error or<br/>confidence below 0.7"| H["Needs Human Review<br/>hold, human queue, 4 h"]
     C -->|"urgency high"| U["Urgent Escalation<br/>Priority 1, alert supervisor, 2 h"]
-    C -->|"Complaint"| CO["Complaint<br/>apology reply, Customer Care, 2 days"]
+    C -->|"Complaint"| CO["Complaint<br/>acknowledgement, senior handler, priority flag, 2 h"]
     C -->|"General Enquiry"| E["General Enquiry<br/>FAQ answer, resolved"]
     C -->|"Service Request"| S["Service Request<br/>confirmation, ticket, 1 day SLA"]
     H --> R
@@ -31,7 +31,7 @@ flowchart LR
 | --- | --- |
 | `workflow/classifier.py` | Gemini calls: classify a request (JSON) and draft a tailored reply |
 | `workflow/branches.py` | Routing rules, the five branch functions, SQLite case log, outbox and follow-ups |
-| `ui/app.py` | Streamlit app (main UI): input, result, messages, dashboard tabs. `app_classic.py` is the earlier layout |
+| `ui/app.py`, `ui/views/` | Streamlit app, one page per question: 1 Submit, 2 Customer inbox, 3 Team inbox, 4 Approvals, 5 Follow-ups, 6 Dashboard. `app_classic.py` is the earlier single-page layout |
 | `evaluation/` | `evaluate.py` (type and urgency accuracy), `evaluate_branches.py` (full routing on harder cases), `test_gemini.py` (API key check) |
 | `data/` | `requests.csv` (24 labelled), `edge_cases.csv` (30 harder), `faq.txt` (sample FAQ), `results/` (evaluation outputs), `cases.db` (created on first run, not committed) |
 | `requirements.txt`, `.env` | Dependencies; API key (`.env` is not committed) |
@@ -47,11 +47,14 @@ Invalid output, an API error or confidence below 0.7 goes to **Needs Human Revie
 ## Remediation strategy
 | Branch | Steps | Follow-up |
 | --- | --- | --- |
-| Complaint | Tailored apology reply; route to Customer Care | Specialist contact in 2 business days |
+| Complaint | Tailored acknowledgement draft (held for human approval); escalate to a senior handler; log with a High priority flag | 2-hour reminder |
 | General Enquiry | Answer from sample FAQ (`data/faq.txt`); log as resolved | None |
 | Service Request | Confirmation reply; create ticket, route to Service Desk | SLA timer, 1 business day |
-| Urgent Escalation | Urgent acknowledgement; Priority 1 flag, alert supervisor, pause auto-resolution | 2 hours |
+| Urgent Escalation | Urgent acknowledgement draft (held for human approval); Critical priority flag, alert supervisor, pause auto-resolution | 2 hours |
 | Needs Human Review | Hold automatic actions; queue for a human with the reason | Review in 4 hours |
+
+**Human approval:** replies for Complaint and Urgent Escalation are held (status "Held - awaiting approval"). A person approves, edits or rejects them in the Approvals tab; only then are they marked sent.
+**Reminders:** when a follow-up time passes and the case is not resolved, the app sends an escalation notification to the supervisor and queues an AI-drafted customer update for approval. Reminders fire when the page loads, with the "Run reminder check" button, or with "Simulate 2 hours passing" for demos. "Mark resolved" stops a case's reminder.
 
 Sending is simulated: replies and notifications are written to an outbox table, not emailed. Real sending would use SMTP or an email API. The FAQ is made-up sample content.
 

@@ -1,10 +1,15 @@
 import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+import sys
 import time
 import pandas as pd
-from classifier import classify
+from workflow.classifier import classify
 
 split = sys.argv[1] if len(sys.argv) > 1 else "dev"
-df = pd.read_csv("requests.csv")
+df = pd.read_csv("data/requests.csv")
 df = df[df["split"] == split]
 
 results = []
@@ -38,4 +43,4 @@ if len(wrong):
     print("\nRows it got wrong:")
     print(wrong[["id", "text", "expected_type", "got_type", "expected_urgency", "got_urgency", "reason"]].to_string())
 
-res.to_csv(f"results_{split}.csv", index=False)
+res.to_csv(f"data/results/results_{split}.csv", index=False)

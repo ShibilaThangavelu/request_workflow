@@ -39,7 +39,7 @@ def classify(text):
     )
     return json.loads(response.text)
 
-FAQ_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "faq.txt")
+FAQ_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "faq.txt")
 try:
     FAQ = open(FAQ_PATH).read()
 except OSError:

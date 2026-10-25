@@ -1,9 +1,10 @@
+import os
 import sqlite3
 import sys
 from datetime import datetime, timedelta
-from classifier import classify, draft_reply
+from workflow.classifier import classify, draft_reply
 
-DB_PATH = "cases.db"
+DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "cases.db")
 MIN_CONFIDENCE = 0.7
 TYPES = {"Complaint", "General Enquiry", "Service Request"}
 URGENCIES = {"low", "medium", "high"}
@@ -19,6 +20,14 @@ FOLLOW_UPS = {
 
 NEW_COLUMNS = {"draft_reply": "TEXT", "follow_up": "TEXT", "follow_up_due": "TEXT"}
 
+# Team that receives a routing notification per branch: (display name, sample address)
+TEAMS = {
+    "Complaint": ("Customer Care Team", "customer-care@sample-company.example"),
+    "Service Request": ("Service Desk", "service-desk@sample-company.example"),
+    "Urgent Escalation": ("On-call Supervisor", "supervisor@sample-company.example"),
+    "Needs Human Review": ("Human Review Queue", "human-review@sample-company.example"),
+}
+
 
 def init_db():
     with sqlite3.connect(DB_PATH) as db:
@@ -27,6 +36,12 @@ def init_db():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 created_at TEXT, request TEXT, type TEXT, urgency TEXT,
                 confidence REAL, reason TEXT, branch TEXT, steps TEXT, status TEXT)"""
+        )
+        db.execute(
+            """CREATE TABLE IF NOT EXISTS outbox (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                case_id INTEGER, created_at TEXT, kind TEXT, to_addr TEXT,
+                subject TEXT, body TEXT, status TEXT)"""
         )
         existing = {row[1] for row in db.execute("PRAGMA table_info(cases)")}
         for column, kind in NEW_COLUMNS.items():
@@ -44,6 +59,28 @@ def log_case(request, result, branch, steps, status, reply, follow_up, due):
              reply, follow_up, due),
         )
         return cur.lastrowid
+
+
+def send_message(case_id, kind, to_addr, subject, body):
+    """Simulated send: the message is stored in the outbox table, nothing leaves the computer."""
+    with sqlite3.connect(DB_PATH) as db:
+        db.execute(
+            "INSERT INTO outbox (case_id, created_at, kind, to_addr, subject, body, status) VALUES (?,?,?,?,?,?,?)",
+            (case_id, datetime.now().isoformat(timespec="seconds"), kind, to_addr, subject, body, "Sent (simulated)"),
+        )
+
+
+def build_notification(case_id, branch, request, result, follow_up, due):
+    conf = result.get("confidence")
+    lines = [
+        "Case #" + str(case_id) + " | " + branch,
+        "Request: " + request,
+        "Type: " + str(result.get("type")) + " | Urgency: " + str(result.get("urgency"))
+        + " | Confidence: " + (f"{conf:.2f}" if isinstance(conf, (int, float)) else "n/a"),
+        "Model reason: " + str(result.get("reason")),
+        "Action needed: " + follow_up + (" (due " + due.replace("T", " ") + ")" if due else ""),
+    ]
+    return "\n".join(lines)
 
 
 def reply_step(reply, what):
@@ -99,27 +136,47 @@ BRANCHES = {
 }
 
 
-def process_request(request):
-    init_db()
-    try:
-        result = classify(request)
-    except Exception as e:
-        result = {"type": None, "urgency": None, "confidence": 0, "reason": "Classifier error: " + str(e)[:80]}
+BRANCH_FUNCTIONS = {
+    "Complaint": complaint,
+    "General Enquiry": general_enquiry,
+    "Service Request": service_request,
+    "Urgent Escalation": urgent_escalation,
+    "Needs Human Review": needs_human_review,
+}
 
+
+def route(result):
+    """Decide the branch from a classification result (no API call, so it can be tested offline)."""
     valid = (
         result.get("type") in TYPES
         and result.get("urgency") in URGENCIES
         and isinstance(result.get("confidence"), (int, float))
     )
     if not valid or result["confidence"] < MIN_CONFIDENCE:
-        branch, fn = "Needs Human Review", needs_human_review
-    elif result["urgency"] == "high":
-        branch, fn = "Urgent Escalation", urgent_escalation
-    else:
-        branch, fn = BRANCHES[result["type"]]
+        return "Needs Human Review"
+    if result["urgency"] == "high":
+        return "Urgent Escalation"
+    return result["type"]
+
+
+def process_request(request, customer_email="customer@example.com"):
+    init_db()
+    try:
+        result = classify(request)
+    except Exception as e:
+        result = {"type": None, "urgency": None, "confidence": 0, "reason": "Classifier error: " + str(e)[:80]}
+
+    branch = route(result)
+    fn = BRANCH_FUNCTIONS[branch]
 
     reply = draft_reply(request, branch)
     steps, status = fn(request, reply)
+
+    team = TEAMS.get(branch)
+    if reply:
+        steps.append("Sent the reply to " + customer_email + " (simulated)")
+    if team:
+        steps.append("Sent a routing notification to " + team[0] + " (simulated)")
 
     follow_up, hours = FOLLOW_UPS[branch]
     due = None
@@ -130,9 +187,22 @@ def process_request(request):
         steps.append("Follow-up: " + follow_up)
 
     case_id = log_case(request, result, branch, steps, status, reply, follow_up, due)
+
+    messages = []
+    if reply:
+        messages.append({"kind": "Customer reply", "to": customer_email,
+                         "subject": "Re: your request (case #" + str(case_id) + ")", "body": reply})
+    if team:
+        messages.append({"kind": "Internal notification", "to": team[1],
+                         "subject": "[" + branch + "] Case #" + str(case_id),
+                         "body": build_notification(case_id, branch, request, result, follow_up, due)})
+    for m in messages:
+        send_message(case_id, m["kind"], m["to"], m["subject"], m["body"])
+
     return {
         "case_id": case_id, "branch": branch, "steps": steps, "status": status,
         "result": result, "reply": reply, "follow_up": follow_up, "follow_up_due": due,
+        "messages": messages,
     }
 
 
@@ -142,6 +212,6 @@ if __name__ == "__main__":
     print(out["branch"], "| case", out["case_id"], "|", out["status"])
     for s in out["steps"]:
         print(" -", s)
-    if out["reply"]:
-        print("Draft reply:")
-        print(out["reply"])
+    for m in out["messages"]:
+        print("--", m["kind"], "to", m["to"], "|", m["subject"])
+        print(m["body"])
